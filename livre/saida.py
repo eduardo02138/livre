@@ -22,6 +22,7 @@ TEMPO_LIMITE_S = 1.5
 TECLAS = {
     "W": e.KEY_W, "A": e.KEY_A, "S": e.KEY_S, "D": e.KEY_D,
     "E": e.KEY_E, "F": e.KEY_F, "ESPACO": e.KEY_SPACE, "SHIFT": e.KEY_LEFTSHIFT,
+    "Q": e.KEY_Q, "V": e.KEY_V, "R": e.KEY_R,
 }
 BOTOES = {"ESQUERDO": e.BTN_LEFT, "DIREITO": e.BTN_RIGHT}
 

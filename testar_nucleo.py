@@ -274,6 +274,69 @@ def enviar_de_verdade():
         print("  dispositivo removido")
 
 
+def verificar_acoes_faciais():
+    """Valida o acionamento de especiais de Overwatch por biometria facial (olhos e boca)."""
+    from livre.rosto import EstadoRosto
+
+    print("\n  acoes faciais & especiais (Overwatch: Shift, E, Q)")
+    mapeador = Mapeador(perfil_padrao="DIRETO")
+    problemas = []
+
+    # 1. Piscadela Olho Direito -> Habilidade 1 / Mobilidade (SHIFT)
+    rosto_dir = EstadoRosto(tem_rosto=True, ear_dir=0.14, ear_esq=0.28, piscadela_direita=True)
+    est = mapeador(None, 0.0, estado_rosto=rosto_dir)
+    if "SHIFT" in est.teclas and any("OLHO_DIREITO" in ev and "SHIFT LIGADO" in ev for ev in est.eventos_novos):
+        print("    ok   piscadela direita -> SHIFT ativado (Habilidade 1)")
+    else:
+        problemas.append("Piscadela direita nao ativou SHIFT")
+
+    # 2. Piscadela Olho Esquerdo -> Habilidade 2 / Tatica (E)
+    rosto_esq = EstadoRosto(tem_rosto=True, ear_dir=0.28, ear_esq=0.14, piscadela_esquerda=True)
+    est = mapeador(None, 0.1, estado_rosto=rosto_esq)
+    if "E" in est.teclas and any("OLHO_ESQUERDO" in ev and "E LIGADO" in ev for ev in est.eventos_novos):
+        print("    ok   piscadela esquerda -> E ativado (Habilidade 2)")
+    else:
+        problemas.append("Piscadela esquerda nao ativou E")
+
+    # 3. Abertura da Boca (Jaw Drop) -> Habilidade Suprema (Q)
+    rosto_boca = EstadoRosto(tem_rosto=True, mar=0.45, boca_aberta=True)
+    est = mapeador(None, 0.2, estado_rosto=rosto_boca)
+    if "Q" in est.teclas and any("BOCA" in ev and "Q LIGADO" in ev for ev in est.eventos_novos):
+        print("    ok   abertura da boca -> Q ativado (Habilidade Suprema / Ultimate)")
+    else:
+        problemas.append("Abertura da boca nao ativou Q")
+
+    # 4. Piscada Bilateral Natural (Filtro anti-falso-positivo)
+    # Quando ambos os olhos piscam, nao deve acionar nem SHIFT nem E
+    rosto_natural = EstadoRosto(tem_rosto=True, ear_dir=0.14, ear_esq=0.14, piscando_ambos=True, piscadela_direita=False, piscadela_esquerda=False)
+    est = mapeador(None, 0.3, estado_rosto=rosto_natural)
+    if "SHIFT" not in est.teclas and "E" not in est.teclas:
+        print("    ok   piscada bilateral natural filtrada (sem disparo de especial)")
+    else:
+        problemas.append("Piscada natural disparou especial indevidamente")
+
+    # 5. Simultaneidade: Mao (W) + Rosto (SHIFT)
+    mao = MaoSintetica()
+    mao.curvas = {n: (CURVA_FORTE if n == "indicador" else 0.0) for n in DEDOS}
+    janela = max((getattr(h, "quadros_confirmacao", 1) for h in mapeador._hist.values()), default=1) + TAMANHO_MEDIANA
+    for i in range(janela):
+        mapeador(mao.marcos(), i * 0.033, estado_rosto=None)
+    est_combo = mapeador(mao.marcos(), 1.0, estado_rosto=rosto_dir)
+    if "W" in est_combo.teclas and "SHIFT" in est_combo.teclas:
+        print("    ok   simultaneidade perfeita: Dedo (W) + Rosto (SHIFT) ativos juntos")
+    else:
+        problemas.append(f"Simultaneidade falhou: teclas={est_combo.teclas}")
+
+    # 6. Perda de Rosto / Soltura segura
+    est_livre = mapeador(None, 1.5, estado_rosto=EstadoRosto(tem_rosto=False))
+    if not est_livre.teclas and any("SOLTO" in ev for ev in est_livre.eventos_novos):
+        print("    ok   perda de rosto solta imediatamente todas as acoes")
+    else:
+        problemas.append("Perda de rosto nao soltou as teclas")
+
+    return problemas
+
+
 def main():
     print("verificacao do nucleo — mao sintetica, sem camera")
 
@@ -284,6 +347,7 @@ def main():
     problemas += verificar_mira()
     problemas += verificar_diagonal()
     problemas += verificar_punho_fechado()
+    problemas += verificar_acoes_faciais()
 
     print()
     if problemas:

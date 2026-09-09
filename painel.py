@@ -36,6 +36,7 @@ from livre.mapeamento import Mapeador, DEDOS, PULSO, centro_palma
 from livre.fonte import MaoSintetica
 from livre.telemetria import GravadorTelemetria
 from livre.config import Configuracao, ACOES_DISPONIVEIS
+from livre.rosto import RastreadorRostoONNX, EstadoRosto
 
 try:
     import cv2
@@ -65,6 +66,7 @@ def parse_args():
     parser.add_argument("--gravar-video", "--gravar", "-g", action="store_true", default=False,
                         help="Grava vídeo duplo (limpo + anotado) na pasta telemetria/")
     parser.add_argument("--camera", "-c", type=int, default=0, help="Índice da câmera (padrão: 0)")
+    parser.add_argument("--sem-rosto", action="store_true", help="Desativa rastreamento de rosto e olhos")
     parser.add_argument("--largura", type=int, default=640, help="Largura do frame (padrão: 640)")
     parser.add_argument("--altura", type=int, default=480, help="Altura do frame (padrão: 480)")
     return parser.parse_args()
@@ -324,6 +326,98 @@ class HUD:
         cv2.putText(tela, "CLIQUE DIR", (ini_x + bw + 32, b_y + 18),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.38, txt_dir, 1 if not dir_ativo else 2, cv2.LINE_AA)
 
+    def desenhar_painel_rosto(self, tela, estado_rosto, acoes_rosto=None):
+        """Desenha o widget de rastreamento facial e especiais de Overwatch."""
+        painel_x = self.w - 280
+        painel_y = 125
+
+        tem_rosto = estado_rosto is not None and estado_rosto.tem_rosto
+        cor_borda = (255, 200, 0) if tem_rosto else (70, 70, 80)
+
+        # Fundo do cabeçalho
+        cv2.rectangle(tela, (painel_x, painel_y), (painel_x + 265, painel_y + 22), (20, 20, 30), -1)
+        cv2.rectangle(tela, (painel_x, painel_y), (painel_x + 265, painel_y + 22), cor_borda, 1)
+
+        txt_hdr = "ROSTO & ESPECIAIS (OVERWATCH)" if tem_rosto else "ROSTO: PROCURANDO CAMERA..."
+        cv2.putText(tela, txt_hdr, (painel_x + 8, painel_y + 15),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.36, (0, 255, 255) if tem_rosto else (140, 140, 150), 1, cv2.LINE_AA)
+
+        if not tem_rosto:
+            cv2.rectangle(tela, (painel_x, painel_y + 24), (painel_x + 265, painel_y + 92), (25, 25, 35), -1)
+            cv2.rectangle(tela, (painel_x, painel_y + 24), (painel_x + 265, painel_y + 92), (50, 50, 60), 1)
+            cv2.putText(tela, "Posicione o rosto na camera", (painel_x + 35, painel_y + 52),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.38, (130, 130, 140), 1, cv2.LINE_AA)
+            cv2.putText(tela, "Shift: Pisc. Dir | E: Pisc. Esq | Q: Boca", (painel_x + 12, painel_y + 74),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.32, (100, 100, 120), 1, cv2.LINE_AA)
+            return
+
+        # Fundo do painel de itens
+        cv2.rectangle(tela, (painel_x, painel_y + 24), (painel_x + 265, painel_y + 102), (25, 25, 35), -1)
+        cv2.rectangle(tela, (painel_x, painel_y + 24), (painel_x + 265, painel_y + 102), (60, 70, 80), 1)
+
+        # 1. Olho Direito -> Habilidade 1 (SHIFT)
+        y1 = painel_y + 28
+        h_row = 21
+        pisc_dir = estado_rosto.piscadela_direita
+        bg_dir = (0, 200, 100) if pisc_dir else (35, 38, 48)
+        txt_dir_cor = (0, 0, 0) if pisc_dir else (220, 220, 230)
+        cv2.rectangle(tela, (painel_x + 6, y1), (painel_x + 259, y1 + h_row), bg_dir, -1)
+        cv2.rectangle(tela, (painel_x + 6, y1), (painel_x + 259, y1 + h_row), (0, 255, 150) if pisc_dir else (70, 75, 85), 1)
+        txt_od = "PISC. DIR -> [SHIFT] HAB. 1" + (" *" if pisc_dir else "")
+        cv2.putText(tela, txt_od, (painel_x + 12, y1 + 15),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, txt_dir_cor, 1 if not pisc_dir else 2, cv2.LINE_AA)
+        cv2.putText(tela, f"{estado_rosto.ear_dir:.2f}", (painel_x + 225, y1 + 15),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.32, (0, 0, 0) if pisc_dir else (140, 160, 180), 1, cv2.LINE_AA)
+
+        # 2. Olho Esquerdo -> Habilidade 2 (E)
+        y2 = y1 + h_row + 4
+        pisc_esq = estado_rosto.piscadela_esquerda
+        bg_esq = (0, 200, 100) if pisc_esq else (35, 38, 48)
+        txt_esq_cor = (0, 0, 0) if pisc_esq else (220, 220, 230)
+        cv2.rectangle(tela, (painel_x + 6, y2), (painel_x + 259, y2 + h_row), bg_esq, -1)
+        cv2.rectangle(tela, (painel_x + 6, y2), (painel_x + 259, y2 + h_row), (0, 255, 150) if pisc_esq else (70, 75, 85), 1)
+        txt_oe = "PISC. ESQ -> [E] HAB. 2" + (" *" if pisc_esq else "")
+        cv2.putText(tela, txt_oe, (painel_x + 12, y2 + 15),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, txt_esq_cor, 1 if not pisc_esq else 2, cv2.LINE_AA)
+        cv2.putText(tela, f"{estado_rosto.ear_esq:.2f}", (painel_x + 225, y2 + 15),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.32, (0, 0, 0) if pisc_esq else (140, 160, 180), 1, cv2.LINE_AA)
+
+        # 3. Boca -> Ultimate (Q)
+        y3 = y2 + h_row + 4
+        boca_ab = estado_rosto.boca_aberta
+        bg_boca = (0, 140, 255) if boca_ab else (35, 38, 48)
+        txt_boca_cor = (0, 0, 0) if boca_ab else (220, 220, 230)
+        cv2.rectangle(tela, (painel_x + 6, y3), (painel_x + 259, y3 + h_row), bg_boca, -1)
+        cv2.rectangle(tela, (painel_x + 6, y3), (painel_x + 259, y3 + h_row), (0, 215, 255) if boca_ab else (70, 75, 85), 1)
+        txt_bc = "ABRIR BOCA -> [Q] ULTIMATE" + (" *SUPREMA!*" if boca_ab else "")
+        cv2.putText(tela, txt_bc, (painel_x + 12, y3 + 15),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, txt_boca_cor, 1 if not boca_ab else 2, cv2.LINE_AA)
+        cv2.putText(tela, f"{estado_rosto.mar:.2f}", (painel_x + 225, y3 + 15),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.32, (0, 0, 0) if boca_ab else (140, 160, 180), 1, cv2.LINE_AA)
+
+        # Indicador de piscada natural ignorada
+        if getattr(estado_rosto, "piscando_ambos", False):
+            cv2.rectangle(tela, (painel_x, painel_y + 105), (painel_x + 265, painel_y + 123), (20, 30, 45), -1)
+            cv2.putText(tela, "[Piscada Bilateral: Ignorada]", (painel_x + 42, painel_y + 118),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.33, (0, 255, 255), 1, cv2.LINE_AA)
+
+    def desenhar_rosto_marcos(self, tela, estado_rosto):
+        """Desenha pontos discretos nos olhos e boca sobre a imagem da câmera."""
+        if estado_rosto is None or not estado_rosto.tem_rosto:
+            return
+
+        cor_od = (0, 255, 255) if estado_rosto.piscadela_direita else (0, 220, 120)
+        for p in estado_rosto.marcos_olho_dir:
+            cv2.circle(tela, (int(p[0]), int(p[1])), 2, cor_od, -1)
+
+        cor_oe = (0, 255, 255) if estado_rosto.piscadela_esquerda else (0, 220, 120)
+        for p in estado_rosto.marcos_olho_esq:
+            cv2.circle(tela, (int(p[0]), int(p[1])), 2, cor_oe, -1)
+
+        cor_bc = (0, 100, 255) if estado_rosto.boca_aberta else (160, 160, 170)
+        for p in estado_rosto.marcos_boca:
+            cv2.circle(tela, (int(p[0]), int(p[1])), 2, cor_bc, -1)
+
     def desenhar_log_eventos(self, tela):
         x = 20
         y = 65
@@ -429,6 +523,14 @@ def main():
     mapeador = Mapeador()
     mapeador.aplicar_configuracao(config)
 
+    rastreador_rosto = None
+    if not args.simulado and not getattr(args, "sem_rosto", False):
+        try:
+            rastreador_rosto = RastreadorRostoONNX()
+            print("👁️  Rastreador Facial ONNX carregado com sucesso (Overwatch: Shift, E, Q)")
+        except Exception as e:
+            print(f"⚠️  Rastreamento facial desativado: {e}")
+
     telemetria = GravadorTelemetria(largura=largura, altura=altura, gravar_video=args.gravar_video)
 
     saida = None
@@ -463,6 +565,7 @@ def main():
     print("  • [<] / [>]: Sensibilidade / Velocidade do mouse | [Z]: Zona morta")
     print("  • [C] ou [R]: Recentralizar e re-travar rastreador na mão")
     print("  • [J]: Alternar saída uinput (Modo Jogo)")
+    print("  • 👁️ Rosto (Overwatch): Pisc. Dir = SHIFT | Pisc. Esq = E | Boca = Q")
     print("  • [Q]: Sair")
     print("=" * 70 + "\n")
 
@@ -480,11 +583,13 @@ def main():
                 if frame is None:
                     continue
                 tela = frame.copy()
+                estado_rosto = rastreador_rosto.estimar(frame) if rastreador_rosto else None
             else:
                 tela = np.zeros((altura, largura, 3), dtype=np.uint8)
                 t_dec = t_agora - t_inicio
                 fonte_sintetica.deslocamento = (0.08 * math.sin(t_dec * 1.5), 0.08 * math.cos(t_dec * 1.5))
                 marcos = fonte_sintetica.marcos()
+                estado_rosto = None
 
             if marcos:
                 cx_p, cy_p = centro_palma(marcos)
@@ -505,7 +610,7 @@ def main():
 
                     hud.desenhar_esqueleto(tela, marcos)
                     hud.desenhar_guia_biometria(tela, tem_mao=True, tempo_vinculado=tempo_vinculado)
-                    estado = mapeador(marcos, t_agora)
+                    estado = mapeador(marcos, t_agora, estado_rosto=estado_rosto)
 
                     if estado.eventos_novos:
                         hud.registrar_eventos(estado.eventos_novos)
@@ -529,14 +634,27 @@ def main():
 
                 hud.desenhar_barras_calibracao(tela, estado.flexoes, config, dedo_selecionado)
                 hud.desenhar_painel_teclas(tela, estado.teclas, estado.botoes, modo_uinput, mapeador.perfil_nome, punho_fechado=estado.punho_fechado)
+                hud.desenhar_painel_rosto(tela, estado_rosto, mapeador.acoes_rosto)
+                hud.desenhar_rosto_marcos(tela, estado_rosto)
                 hud.desenhar_log_eventos(tela)
 
                 # Telemetria ao vivo no console
                 if t_agora - t_ultimo_log > 0.10:
                     t_ultimo_log = t_agora
+                    rosto_tag = ""
+                    if estado.rosto_ativo:
+                        partes = []
+                        if estado.piscadela_direita:
+                            partes.append("👁️DIR:SHIFT")
+                        if estado.piscadela_esquerda:
+                            partes.append("👁️ESQ:E")
+                        if estado.boca_aberta:
+                            partes.append("👄BOCA:Q")
+                        rosto_tag = " | " + " ".join(partes) if partes else " | 👁️ROSTO:OK"
+
                     if estado.punho_fechado:
                         sys.stdout.write(
-                            f"\r📊 FPS: {int(1.0/dt):2d} | ✊ PUNHO FECHADO [NEUTRO / REPOUSO - COMANDOS SUSPENSOS]                "
+                            f"\r📊 FPS: {int(1.0/dt):2d} | ✊ PUNHO FECHADO [NEUTRO / REPOUSO]{rosto_tag}                "
                         )
                     else:
                         pol = int(estado.flexoes.get('polegar', 0) * 100)
@@ -550,7 +668,7 @@ def main():
                         sys.stdout.write(
                             f"\r📊 FPS: {int(1.0/dt):2d} | IND: {ind:2d}% ({'W' if 'W' in estado.teclas else ' '}) | "
                             f"MED: {med:2d}% ({'S' if 'S' in estado.teclas else ' '}) | "
-                            f"POL: {pol:2d}% | MIN: {min_:2d}% | ANE: {ane:2d}% | "
+                            f"POL: {pol:2d}% | MIN: {min_:2d}% | ANE: {ane:2d}%{rosto_tag} | "
                             f"TECLAS: [{t_str}] | MOUSE: [{b_str}]   "
                         )
                     sys.stdout.flush()
@@ -559,20 +677,40 @@ def main():
                     saida.aplicar(estado, dt)
             else:
                 ja_estava_vinculado = False
-                telemetria.registrar_quadro(fps=1.0/dt, estado=None, aciona=mapeador.aciona)
-                hud.desenhar_guia_biometria(tela, tem_mao=False, tempo_vinculado=0.0)
-                hud.desenhar_painel_teclas(tela, set(), set(), modo_uinput, mapeador.perfil_nome)
-                hud.desenhar_log_eventos(tela)
-
-                # Auto-release: solta imediatamente qualquer tecla/botão no kernel e limpa histórico
-                evs_reset = mapeador.reset()
-                if evs_reset:
-                    hud.registrar_eventos(evs_reset)
-                    for ev in evs_reset:
+                estado = mapeador(None, t_agora, estado_rosto=estado_rosto)
+                if estado.eventos_novos:
+                    hud.registrar_eventos(estado.eventos_novos)
+                    for ev in estado.eventos_novos:
                         telemetria.registrar_evento(ev, categoria="ACAO")
 
+                telemetria.registrar_quadro(fps=1.0/dt, estado=estado, aciona=mapeador.aciona)
+                hud.desenhar_guia_biometria(tela, tem_mao=False, tempo_vinculado=0.0)
+                hud.desenhar_painel_teclas(tela, estado.teclas, estado.botoes, modo_uinput, mapeador.perfil_nome)
+                hud.desenhar_painel_rosto(tela, estado_rosto, mapeador.acoes_rosto)
+                hud.desenhar_rosto_marcos(tela, estado_rosto)
+                hud.desenhar_log_eventos(tela)
+
+                # Telemetria ao vivo no console quando a mão não está no quadro
+                if t_agora - t_ultimo_log > 0.10:
+                    t_ultimo_log = t_agora
+                    rosto_tag = ""
+                    if estado.rosto_ativo:
+                        partes = []
+                        if estado.piscadela_direita:
+                            partes.append("👁️DIR:SHIFT")
+                        if estado.piscadela_esquerda:
+                            partes.append("👁️ESQ:E")
+                        if estado.boca_aberta:
+                            partes.append("👄BOCA:Q")
+                        rosto_tag = " | " + " ".join(partes) if partes else " | 👁️ROSTO:OK"
+                    t_str = ",".join(sorted(estado.teclas)) if estado.teclas else "-"
+                    sys.stdout.write(
+                        f"\r📊 FPS: {int(1.0/dt):2d} | ✋ MAO: AUSENTE{rosto_tag} | TECLAS: [{t_str}]                    "
+                    )
+                    sys.stdout.flush()
+
                 if modo_uinput and saida:
-                    saida.soltar_tudo()
+                    saida.aplicar(estado, dt)
 
             # Desenha Central de Configuração se TAB estiver ativo
             if menu_aberto:

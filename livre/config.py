@@ -16,6 +16,9 @@ ACOES_DISPONIVEIS = [
     ("tecla", "D"),
     ("tecla", "E"),
     ("tecla", "F"),
+    ("tecla", "Q"),
+    ("tecla", "V"),
+    ("tecla", "R"),
     ("tecla", "ESPACO"),
     ("tecla", "SHIFT"),
     ("botao", "ESQUERDO"),
@@ -31,6 +34,12 @@ CONFIG_PADRAO = {
         "medio":     {"tipo": "tecla", "alvo": "S",        "aciona": 0.62, "libera": 0.36},
         "anelar":    {"tipo": "tecla", "alvo": "E",        "aciona": 0.65, "libera": 0.38},
         "mindinho":  {"tipo": "botao", "alvo": "DIREITO",  "aciona": 0.58, "libera": 0.34},
+    },
+    "rosto": {
+        "ativado": True,
+        "olho_direito":  {"tipo": "tecla", "alvo": "SHIFT"},  # Especial 1 / Mobilidade Overwatch
+        "olho_esquerdo": {"tipo": "tecla", "alvo": "E"},      # Especial 2 / Tático Overwatch
+        "boca":          {"tipo": "tecla", "alvo": "Q"},      # Suprema / Ultimate Overwatch
     },
     "mouse": {
         "modo": "relativo",
@@ -61,6 +70,8 @@ class Configuracao:
                 for d in CONFIG_PADRAO["dedos"]:
                     if d not in cfg.get("dedos", {}):
                         cfg.setdefault("dedos", {})[d] = CONFIG_PADRAO["dedos"][d].copy()
+                if "rosto" not in cfg:
+                    cfg["rosto"] = json.loads(json.dumps(CONFIG_PADRAO["rosto"]))
                 if "mouse" not in cfg:
                     cfg["mouse"] = CONFIG_PADRAO["mouse"].copy()
                 return cfg

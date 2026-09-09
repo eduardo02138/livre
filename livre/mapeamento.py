@@ -13,16 +13,17 @@ from dataclasses import dataclass, field
 
 from .filtros import Histerese, OneEuro, velocidade
 
-PULSO = 0
-DEDOS = {
-    "polegar": (1, 2, 3, 4),
-    "indicador": (5, 6, 7, 8),
-    "medio": (9, 10, 11, 12),
-    "anelar": (13, 14, 15, 16),
-    "mindinho": (17, 18, 19, 20),
-}
+from .biomecanica import (  # noqa: F401  reexportado por compatibilidade
+    ASPECTO_PADRAO,
+    DEDOS,
+    PULSO,
+    _angulo,
+    _desfazer_aspecto,
+    centro_palma,
+    flexao_dedo,
+    flexao_polegar,
+)
 
-# Limiares anatomicos individualizados calibrados com base na telemetria
 LIMIARES_INDIVIDUAIS = {
     "indicador": (0.62, 0.36),  # W (ou ação remapeada)
     "medio":     (0.62, 0.36),  # S
@@ -50,93 +51,9 @@ PERFIL_HIBRIDO = {
 }
 
 
-ASPECTO_PADRAO = 640.0 / 480.0
-
 # Janela da mediana movel sobre a flexao. Em 5 quadros (~170 ms a 30 fps),
 # um pico de ate 2 quadros e descartado sem afetar o valor de repouso.
 TAMANHO_MEDIANA = 5
-
-
-def _desfazer_aspecto(p, aspecto=ASPECTO_PADRAO):
-    """Converte coordenadas normalizadas para espaço isométrico (desfaz a distorção 4:3)."""
-    return (p[0] * aspecto, p[1])
-
-
-def _angulo(a, b, c):
-    """Angulo em graus no vertice b, entre os segmentos b->a e b->c."""
-    v1 = (a[0] - b[0], a[1] - b[1])
-    v2 = (c[0] - b[0], c[1] - b[1])
-    n1 = math.hypot(*v1)
-    n2 = math.hypot(*v2)
-    if n1 < 1e-9 or n2 < 1e-9:
-        return 180.0
-    cos = (v1[0] * v2[0] + v1[1] * v2[1]) / (n1 * n2)
-    return math.degrees(math.acos(max(-1.0, min(1.0, cos))))
-
-
-def flexao_dedo(marcos_geo, dedo):
-    """Calcula flexao combinando angulo articular e encurtamento em espaço isométrico."""
-    mcp, pip, dip, tip = (marcos_geo[i] for i in dedo)
-
-    # 1. Angulo articular real das articulacoes interfalangicas (PIP e DIP).
-    # Dedos em repouso estao naturalmente entre 150 e 175 graus.
-    # Exige curvatura articular genuina (< 155 graus) para iniciar a contagem.
-    ang = (_angulo(mcp, pip, dip) + _angulo(pip, dip, tip)) / 2.0
-    f_angulo = max(0.0, min(1.0, (155.0 - ang) / 65.0))
-
-    # 2. Encurtamento: razao entre distancia ponta-base e o comprimento somado dos ossos.
-    # Em repouso, a razao fica acima de 0.85. Ao dobrar o dedo, cai abaixo de 0.50.
-    comp_ossos = (math.hypot(pip[0]-mcp[0], pip[1]-mcp[1]) +
-                  math.hypot(dip[0]-pip[0], dip[1]-pip[1]) +
-                  math.hypot(tip[0]-dip[0], tip[1]-dip[1]))
-    if comp_ossos < 1e-6:
-        return 0.0
-
-    dist_direta = math.hypot(tip[0]-mcp[0], tip[1]-mcp[1])
-    f_encurtamento = max(0.0, min(1.0, (0.85 - (dist_direta / comp_ossos)) / 0.45))
-
-    # Fusao ponderada: 75% angulo articular (imune a corte de borda e perspectiva) + 25% encurtamento
-    return max(0.0, min(1.0, 0.75 * f_angulo + 0.25 * f_encurtamento))
-
-
-def flexao_polegar(marcos_geo):
-    """Mede a flexao do polegar unindo articulacao propria (IP/MCP) e oposicao."""
-    pulso = marcos_geo[0]
-    p1, p2, p3, p4 = (marcos_geo[i] for i in (1, 2, 3, 4))
-    base_indicador = marcos_geo[5]
-
-    # 1. Curvatura da articulacao interfalangiana do polegar (nós 2-3-4)
-    ang_ip = _angulo(p2, p3, p4)
-    f_angulo = max(0.0, min(1.0, (170.0 - ang_ip) / 75.0))
-
-    # 2. Encurtamento próprio da falange do polegar (distância ponta-MCP vs soma dos ossos)
-    comp_ossos = math.hypot(p3[0] - p2[0], p3[1] - p2[1]) + math.hypot(p4[0] - p3[0], p4[1] - p3[1])
-    if comp_ossos > 1e-6:
-        dist_direta = math.hypot(p4[0] - p2[0], p4[1] - p2[1])
-        f_encurtamento = max(0.0, min(1.0, (1.0 - (dist_direta / comp_ossos)) / 0.35))
-    else:
-        f_encurtamento = 0.0
-
-    # 3. Oposicao (distancia ponta do polegar ate a base do indicador)
-    dist_oposta = math.hypot(p4[0] - base_indicador[0], p4[1] - base_indicador[1])
-    comp_palma = math.hypot(base_indicador[0] - pulso[0], base_indicador[1] - pulso[1])
-    if comp_palma > 1e-6:
-        razao_op = dist_oposta / comp_palma
-        f_oposicao = max(0.0, min(1.0, (0.75 - razao_op) / 0.45))
-    else:
-        f_oposicao = 0.0
-
-    # Fusao: 45% curvatura articular + 35% encurtamento + 20% oposicao
-    return max(0.0, min(1.0, 0.45 * f_angulo + 0.35 * f_encurtamento + 0.20 * f_oposicao))
-
-
-def centro_palma(marcos):
-    """Centroide do pulso com as quatro bases dos dedos."""
-    idx = (PULSO,) + tuple(d[0] for d in DEDOS.values() if d[0] != 1)
-    return (
-        sum(marcos[i][0] for i in idx) / len(idx),
-        sum(marcos[i][1] for i in idx) / len(idx),
-    )
 
 
 @dataclass
@@ -153,6 +70,14 @@ class Estado:
     perfil: str = "DIRETO"
     eventos_novos: list = field(default_factory=list)
     punho_fechado: bool = False
+    rosto_ativo: bool = False
+    ear_dir: float = 0.30
+    ear_esq: float = 0.30
+    mar: float = 0.05
+    piscadela_direita: bool = False
+    piscadela_esquerda: bool = False
+    boca_aberta: bool = False
+    piscando_ambos: bool = False
 
 
 class Mapeador:
@@ -203,6 +128,18 @@ class Mapeador:
         self._punho_fechado = False
         self._cont_libera_punho = 0
 
+        # Mapeamento e estado de ações faciais (Overwatch Specials & Ultimate)
+        self.acoes_rosto = {
+            "olho_direito":  ("tecla", "SHIFT"),
+            "olho_esquerdo": ("tecla", "E"),
+            "boca":          ("tecla", "Q"),
+        }
+        self._estado_anterior_rosto = {
+            "olho_direito": False,
+            "olho_esquerdo": False,
+            "boca": False,
+        }
+
     def _mediana(self, nome, valor):
         """Mediana movel sobre a flexao, para matar pico de 1-2 quadros.
 
@@ -247,6 +184,11 @@ class Mapeador:
             self._hist[nome].libera = d["libera"]
             self.acoes[nome] = (d["tipo"], d["alvo"])
 
+        r_cfg = config.dados.get("rosto", {})
+        for gesto in ("olho_direito", "olho_esquerdo", "boca"):
+            if gesto in r_cfg:
+                self.acoes_rosto[gesto] = (r_cfg[gesto]["tipo"], r_cfg[gesto]["alvo"])
+
         m = config.dados.get("mouse", {})
         self.modo_mouse = m.get("modo", self.modo_mouse)
         self.sensibilidade_mouse = float(m.get("sensibilidade", self.sensibilidade_mouse))
@@ -281,215 +223,275 @@ class Mapeador:
                 tipo, alvo = self.acoes.get(nome, ("indefinido", ""))
                 eventos.append(f"{nome.upper()} [0%] -> {alvo} SOLTO")
         self._estado_anterior_dobrado = {nome: False for nome in DEDOS}
+
+        for gesto, estava in self._estado_anterior_rosto.items():
+            if estava:
+                tipo, alvo = self.acoes_rosto.get(gesto, ("indefinido", ""))
+                eventos.append(f"ROSTO [{gesto.upper()}] -> {alvo} SOLTO")
+        self._estado_anterior_rosto = {k: False for k in self._estado_anterior_rosto}
+
         self._estado_anterior_teclas.clear()
         self._estado_anterior_botoes.clear()
         return eventos
 
-    def __call__(self, marcos, t):
+    def __call__(self, marcos, t, estado_rosto=None):
         est = Estado(perfil=self.perfil_nome)
 
-        # Suavização temporal suave dos marcos (EMA alpha=0.70) para eliminar microjitter
-        if self._marcos_suaves is None or len(self._marcos_suaves) != len(marcos):
-            self._marcos_suaves = [(float(x), float(y)) for x, y in marcos]
-        else:
-            alpha = 0.70
-            self._marcos_suaves = [
-                (alpha * x + (1.0 - alpha) * sx, alpha * y + (1.0 - alpha) * sy)
-                for (x, y), (sx, sy) in zip(marcos, self._marcos_suaves)
-            ]
-
-        # Os marcos chegam normalizados por LARGURA e ALTURA separadamente,
-        # o que num quadro 4:3 distorce angulos — e flexao E angulo. Aqui a
-        # distorcao e desfeita so para a geometria dos dedos; a mira segue
-        # usando 'marcos' cru, que e o espaco em que o painel desenha.
-        marcos_geo = [(x * self.aspecto, y) for x, y in self._marcos_suaves]
-
-        # Trava de segurança de borda: se a mão estiver muito próxima da borda (< 5%),
-        # inibe novos acionamentos para evitar picos causados pelo corte do sensor
-        cx_p, cy_p = centro_palma(marcos)
-        na_borda = (cx_p < 0.05 or cx_p > 0.95 or cy_p < 0.05 or cy_p > 0.95)
-
-        dobrado = {}
-        for nome, idx in DEDOS.items():
-            if nome == "polegar":
-                f = flexao_polegar(marcos_geo)
+        if marcos is not None and len(marcos) > 0:
+            # Suavização temporal suave dos marcos (EMA alpha=0.70) para eliminar microjitter
+            if self._marcos_suaves is None or len(self._marcos_suaves) != len(marcos):
+                self._marcos_suaves = [(float(x), float(y)) for x, y in marcos]
             else:
-                f = flexao_dedo(marcos_geo, idx)
+                alpha = 0.70
+                self._marcos_suaves = [
+                    (alpha * x + (1.0 - alpha) * sx, alpha * y + (1.0 - alpha) * sy)
+                    for (x, y), (sx, sy) in zip(marcos, self._marcos_suaves)
+                ]
 
-            f = self._mediana(nome, f)
-            est.flexoes[nome] = f
-            dobrado[nome] = False if na_borda else self._hist[nome](f)
+            # Os marcos chegam normalizados por LARGURA e ALTURA separadamente,
+            # o que num quadro 4:3 distorce angulos — e flexao E angulo. Aqui a
+            # distorcao e desfeita so para a geometria dos dedos; a mira segue
+            # usando 'marcos' cru, que e o espaco em que o painel desenha.
+            marcos_geo = [(x * self.aspecto, y) for x, y in self._marcos_suaves]
 
-        # -------------------------------------------------------------
-        # DETECÇÃO BIOMECÂNICA DE PUNHO FECHADO (GESTO NEUTRO / CLUTCH)
-        # -------------------------------------------------------------
-        # Ao fechar a mão em punho, múltiplos dedos longos se curvam juntos.
-        # Isso NÃO representa intenção de comandos simultâneos (ex: W + S + E + Botões).
-        dedos_longos = ("indicador", "medio", "anelar", "mindinho")
-        longos_flex = [est.flexoes.get(d, 0.0) for d in dedos_longos]
-        media_longos = sum(longos_flex) / 4.0
-        qtd_longos_flex = sum(1 for f in longos_flex if f >= 0.55)
+            # Trava de segurança de borda: se a mão estiver muito próxima da borda (< 5%),
+            # inibe novos acionamentos para evitar picos causados pelo corte do sensor
+            cx_p, cy_p = centro_palma(marcos)
+            na_borda = (cx_p < 0.05 or cx_p > 0.95 or cy_p < 0.05 or cy_p > 0.95)
 
-        # Critério de ativação do punho fechado:
-        # 1. Média dos dedos longos >= 62% E pelo menos 3 dedos longos dobrados (>= 55%)
-        # 2. OU conflito biomecânico simultâneo W + S + Anelar
-        candidato_punho = (media_longos >= 0.62 and qtd_longos_flex >= 3) or (
-            est.flexoes.get("indicador", 0.0) >= 0.65
-            and est.flexoes.get("medio", 0.0) >= 0.65
-            and est.flexoes.get("anelar", 0.0) >= 0.55
-        )
+            dobrado = {}
+            for nome, idx in DEDOS.items():
+                if nome == "polegar":
+                    f = flexao_polegar(marcos_geo)
+                else:
+                    f = flexao_dedo(marcos_geo, idx)
 
-        if not self._punho_fechado:
-            if candidato_punho:
-                self._punho_fechado = True
-                self._cont_libera_punho = 0
-                est.eventos_novos.append("PUNHO [FECHADO] -> ACOES SUSPENSAS (NEUTRO)")
-        else:
-            # Histerese de saída com debounce de 3 quadros (~100ms)
-            # Evita que oclusões momentâneas do MediaPipe soltem o estado de punho por 1 quadro
-            if media_longos < 0.42 or qtd_longos_flex < 2:
-                self._cont_libera_punho += 1
-                if self._cont_libera_punho >= 3:
-                    self._punho_fechado = False
+                f = self._mediana(nome, f)
+                est.flexoes[nome] = f
+                dobrado[nome] = False if na_borda else self._hist[nome](f)
+
+            # -------------------------------------------------------------
+            # DETECÇÃO BIOMECÂNICA DE PUNHO FECHADO (GESTO NEUTRO / CLUTCH)
+            # -------------------------------------------------------------
+            # Ao fechar a mão em punho, múltiplos dedos longos se curvam juntos.
+            # Isso NÃO representa intenção de comandos simultâneos (ex: W + S + E + Botões).
+            dedos_longos = ("indicador", "medio", "anelar", "mindinho")
+            longos_flex = [est.flexoes.get(d, 0.0) for d in dedos_longos]
+            media_longos = sum(longos_flex) / 4.0
+            qtd_longos_flex = sum(1 for f in longos_flex if f >= 0.55)
+
+            # Critério de ativação do punho fechado:
+            # 1. Média dos dedos longos >= 62% E pelo menos 3 dedos longos dobrados (>= 55%)
+            # 2. OU conflito biomecânico simultâneo W + S + Anelar
+            candidato_punho = (media_longos >= 0.62 and qtd_longos_flex >= 3) or (
+                est.flexoes.get("indicador", 0.0) >= 0.65
+                and est.flexoes.get("medio", 0.0) >= 0.65
+                and est.flexoes.get("anelar", 0.0) >= 0.55
+            )
+
+            if not self._punho_fechado:
+                if candidato_punho:
+                    self._punho_fechado = True
                     self._cont_libera_punho = 0
-                    est.eventos_novos.append("PUNHO [ABERTO] -> CONTROLE ATIVO")
+                    est.eventos_novos.append("PUNHO [FECHADO] -> ACOES SUSPENSAS (NEUTRO)")
             else:
-                self._cont_libera_punho = 0
+                # Histerese de saída com debounce de 3 quadros (~100ms)
+                # Evita que oclusões momentâneas do MediaPipe soltem o estado de punho por 1 quadro
+                if media_longos < 0.42 or qtd_longos_flex < 2:
+                    self._cont_libera_punho += 1
+                    if self._cont_libera_punho >= 3:
+                        self._punho_fechado = False
+                        self._cont_libera_punho = 0
+                        est.eventos_novos.append("PUNHO [ABERTO] -> CONTROLE ATIVO")
+                else:
+                    self._cont_libera_punho = 0
 
-        est.punho_fechado = self._punho_fechado
+            est.punho_fechado = self._punho_fechado
 
-        if self._punho_fechado:
-            # Supressão total de comandos: punho fechado é neutro / descanso
-            for nome in DEDOS:
-                dobrado[nome] = False
-        else:
-            # -------------------------------------------------------------
-            # REGRA BIOMECÂNICA DE EXCLUSIVIDADE MÚTUA W vs S
-            # -------------------------------------------------------------
-            # Se tanto o indicador (W) quanto o médio (S) atingirem o limiar,
-            # o que estiver mais dobrado assume 100% da intenção, com histerese
-            # de transição para evitar oscilações a cada quadro.
-            if self.perfil_nome == "DIRETO":
-                f_ind = est.flexoes.get("indicador", 0.0)
-                f_med = est.flexoes.get("medio", 0.0)
-                if dobrado["indicador"] and dobrado["medio"]:
-                    ind_estava = self._estado_anterior_dobrado.get("indicador", False)
-                    med_estava = self._estado_anterior_dobrado.get("medio", False)
-                    if ind_estava and not med_estava:
-                        if f_med > (f_ind + 0.08):
-                            dobrado["indicador"] = False
+            if self._punho_fechado:
+                # Supressão total de comandos: punho fechado é neutro / descanso
+                for nome in DEDOS:
+                    dobrado[nome] = False
+            else:
+                # -------------------------------------------------------------
+                # REGRA BIOMECÂNICA DE EXCLUSIVIDADE MÚTUA W vs S
+                # -------------------------------------------------------------
+                # Se tanto o indicador (W) quanto o médio (S) atingirem o limiar,
+                # o que estiver mais dobrado assume 100% da intenção, com histerese
+                # de transição para evitar oscilações a cada quadro.
+                if self.perfil_nome == "DIRETO":
+                    f_ind = est.flexoes.get("indicador", 0.0)
+                    f_med = est.flexoes.get("medio", 0.0)
+                    if dobrado["indicador"] and dobrado["medio"]:
+                        ind_estava = self._estado_anterior_dobrado.get("indicador", False)
+                        med_estava = self._estado_anterior_dobrado.get("medio", False)
+                        if ind_estava and not med_estava:
+                            if f_med > (f_ind + 0.08):
+                                dobrado["indicador"] = False
+                            else:
+                                dobrado["medio"] = False
+                        elif med_estava and not ind_estava:
+                            if f_ind > (f_med + 0.08):
+                                dobrado["medio"] = False
+                            else:
+                                dobrado["indicador"] = False
                         else:
-                            dobrado["medio"] = False
-                    elif med_estava and not ind_estava:
-                        if f_ind > (f_med + 0.08):
-                            dobrado["medio"] = False
-                        else:
-                            dobrado["indicador"] = False
-                    else:
-                        if f_ind >= f_med:
-                            dobrado["medio"] = False
-                        else:
-                            dobrado["indicador"] = False
+                            if f_ind >= f_med:
+                                dobrado["medio"] = False
+                            else:
+                                dobrado["indicador"] = False
 
-                # Desacoplamento do anelar: quando o médio se dobra muito,
-                # o tendão do anelar sobe por inércia física. Suprimimos essa falsa ativação.
-                if f_med > 0.50 and est.flexoes.get("anelar", 0.0) < (f_med + 0.12):
-                    dobrado["anelar"] = False
+                    # Desacoplamento do anelar: quando o médio se dobra muito,
+                    # o tendão do anelar sobe por inércia física. Suprimimos essa falsa ativação.
+                    if f_med > 0.50 and est.flexoes.get("anelar", 0.0) < (f_med + 0.12):
+                        dobrado["anelar"] = False
 
-                # Desacoplamento inteligente do mindinho:
-                # O mindinho só é suprimido se for arraste passivo do médio ou do anelar
-                # (quando o dedo motor principal estiver consideravelmente mais flexionado que o mindinho).
-                # Se o mindinho for acionado deliberadamente, ele NÃO é bloqueado.
-                f_ane = est.flexoes.get("anelar", 0.0)
-                f_min = est.flexoes.get("mindinho", 0.0)
-                if f_med > 0.50 and f_min < (f_med - 0.10):
-                    dobrado["mindinho"] = False
-                elif f_ane > 0.50 and f_min < (f_ane - 0.08):
-                    dobrado["mindinho"] = False
+                    # Desacoplamento inteligente do mindinho:
+                    # O mindinho só é suprimido se for arraste passivo do médio ou do anelar
+                    # (quando o dedo motor principal estiver consideravelmente mais flexionado que o mindinho).
+                    # Se o mindinho for acionado deliberadamente, ele NÃO é bloqueado.
+                    f_ane = est.flexoes.get("anelar", 0.0)
+                    f_min = est.flexoes.get("mindinho", 0.0)
+                    if f_med > 0.50 and f_min < (f_med - 0.10):
+                        dobrado["mindinho"] = False
+                    elif f_ane > 0.50 and f_min < (f_ane - 0.08):
+                        dobrado["mindinho"] = False
 
-        # Dispara eventos de telemetria para mudanças de estado
-        for nome, ligado in dobrado.items():
-            if dobrado[nome] and not self._estado_anterior_dobrado[nome]:
-                tipo, alvo = self.acoes.get(nome, ("indefinido", ""))
-                est.eventos_novos.append(f"{nome.upper()} [{int(est.flexoes[nome]*100)}%] -> {alvo} LIGADO")
-            elif not dobrado[nome] and self._estado_anterior_dobrado[nome]:
-                tipo, alvo = self.acoes.get(nome, ("indefinido", ""))
-                est.eventos_novos.append(f"{nome.upper()} [{int(est.flexoes[nome]*100)}%] -> {alvo} SOLTO")
+            # Dispara eventos de telemetria para mudanças de estado
+            for nome, ligado in dobrado.items():
+                if dobrado[nome] and not self._estado_anterior_dobrado[nome]:
+                    tipo, alvo = self.acoes.get(nome, ("indefinido", ""))
+                    est.eventos_novos.append(f"{nome.upper()} [{int(est.flexoes[nome]*100)}%] -> {alvo} LIGADO")
+                elif not dobrado[nome] and self._estado_anterior_dobrado[nome]:
+                    tipo, alvo = self.acoes.get(nome, ("indefinido", ""))
+                    est.eventos_novos.append(f"{nome.upper()} [{int(est.flexoes[nome]*100)}%] -> {alvo} SOLTO")
 
-        self._estado_anterior_dobrado = dobrado.copy()
+            self._estado_anterior_dobrado = dobrado.copy()
 
-        # Atribuição de ações
-        for nome, ligado in dobrado.items():
-            if not ligado or nome not in self.acoes:
-                continue
-            tipo, alvo = self.acoes[nome]
-            if tipo == "botao":
-                est.botoes.add(alvo)
-            elif tipo == "tecla":
-                est.teclas.add(alvo)
+            # Atribuição de ações
+            for nome, ligado in dobrado.items():
+                if not ligado or nome not in self.acoes:
+                    continue
+                tipo, alvo = self.acoes[nome]
+                if tipo == "botao":
+                    est.botoes.add(alvo)
+                elif tipo == "tecla":
+                    est.teclas.add(alvo)
 
-        # Mira do mouse
-        cx, cy = centro_palma(marcos)
-        cx = self._fx(cx, t)
-        cy = self._fy(cy, t)
-        est.palma = (cx, cy)
+            # Mira do mouse
+            cx, cy = centro_palma(marcos)
+            cx = self._fx(cx, t)
+            cy = self._fy(cy, t)
+            est.palma = (cx, cy)
 
-        dx = max(-1.0, min(1.0, (cx - self.centro[0]) * 2.0))
-        dy = max(-1.0, min(1.0, (cy - self.centro[1]) * 2.0))
-        est.dx = dx
-        est.dy = dy
+            dx = max(-1.0, min(1.0, (cx - self.centro[0]) * 2.0))
+            dy = max(-1.0, min(1.0, (cy - self.centro[1]) * 2.0))
+            est.dx = dx
+            est.dy = dy
 
-        # Cálculo de velocidade do mouse (Modo Relativo vs Modo Joystick)
-        if self._punho_fechado:
-            # Embreagem de reposicionamento (Clutch): cursor parado sem solavancos
-            vx, vy = 0.0, 0.0
-            self._palma_ant = (cx, cy)
-            self._t_palma_ant = t
-        elif self.modo_mouse == "relativo":
-            if self._palma_ant is None or self._t_palma_ant is None:
+            # Cálculo de velocidade do mouse (Modo Relativo vs Modo Joystick)
+            if self._punho_fechado:
+                # Embreagem de reposicionamento (Clutch): cursor parado sem solavancos
+                vx, vy = 0.0, 0.0
                 self._palma_ant = (cx, cy)
                 self._t_palma_ant = t
-                vx, vy = 0.0, 0.0
-            else:
-                dt_palma = max(1e-4, t - self._t_palma_ant)
-                delta_x = cx - self._palma_ant[0]
-                delta_y = cy - self._palma_ant[1]
-                dist = math.hypot(delta_x, delta_y)
-
-                if dist < self.limiar_ruido_relativo:
-                    # Mão parada: elimina rigorosamente qualquer deriva e ruído de sensor
+            elif self.modo_mouse == "relativo":
+                if self._palma_ant is None or self._t_palma_ant is None:
+                    self._palma_ant = (cx, cy)
+                    self._t_palma_ant = t
                     vx, vy = 0.0, 0.0
                 else:
-                    # Movimento dinâmico proporcional com aceleração balística suave
-                    ganho = (dist / 0.01) ** 0.15 if dist > 0.01 else 1.0
-                    vx = (delta_x / dt_palma) * self.sensibilidade_mouse * ganho
-                    vy = (delta_y / dt_palma) * self.sensibilidade_mouse * ganho
-                    vx = max(-self.vel_max, min(self.vel_max, vx))
-                    vy = max(-self.vel_max, min(self.vel_max, vy))
+                    dt_palma = max(1e-4, t - self._t_palma_ant)
+                    delta_x = cx - self._palma_ant[0]
+                    delta_y = cy - self._palma_ant[1]
+                    dist = math.hypot(delta_x, delta_y)
 
-                self._palma_ant = (cx, cy)
-                self._t_palma_ant = t
-        else:
-            vx = velocidade(dx, self.zona_morta, self.expo, self.vel_max)
-            vy = velocidade(dy, self.zona_morta, self.expo, self.vel_max)
+                    if dist < self.limiar_ruido_relativo:
+                        # Mão parada: elimina rigorosamente qualquer deriva e ruído de sensor
+                        vx, vy = 0.0, 0.0
+                    else:
+                        # Movimento dinâmico proporcional com aceleração balística suave
+                        ganho = (dist / 0.01) ** 0.15 if dist > 0.01 else 1.0
+                        vx = (delta_x / dt_palma) * self.sensibilidade_mouse * ganho
+                        vy = (delta_y / dt_palma) * self.sensibilidade_mouse * ganho
+                        vx = max(-self.vel_max, min(self.vel_max, vx))
+                        vy = max(-self.vel_max, min(self.vel_max, vy))
 
-        if self.perfil_nome == "HIBRIDO":
-            est.modo_movimento = dobrado.get("medio", False)
-            if est.modo_movimento:
-                if dy < -self.zona_morta:
-                    est.teclas.add("W")
-                if dy > self.zona_morta:
-                    est.teclas.add("S")
-                if dx < -self.zona_morta:
-                    est.teclas.add("A")
-                if dx > self.zona_morta:
-                    est.teclas.add("D")
+                    self._palma_ant = (cx, cy)
+                    self._t_palma_ant = t
+            else:
+                vx = velocidade(dx, self.zona_morta, self.expo, self.vel_max)
+                vy = velocidade(dy, self.zona_morta, self.expo, self.vel_max)
+
+            if self.perfil_nome == "HIBRIDO":
+                est.modo_movimento = dobrado.get("medio", False)
+                if est.modo_movimento:
+                    if dy < -self.zona_morta:
+                        est.teclas.add("W")
+                    if dy > self.zona_morta:
+                        est.teclas.add("S")
+                    if dx < -self.zona_morta:
+                        est.teclas.add("A")
+                    if dx > self.zona_morta:
+                        est.teclas.add("D")
+                else:
+                    est.vel_x = vx
+                    est.vel_y = vy
             else:
                 est.vel_x = vx
                 est.vel_y = vy
         else:
-            est.vel_x = vx
-            est.vel_y = vy
+            # Mão ausente: solta os dedos se algum estava dobrado
+            for nome, estava in self._estado_anterior_dobrado.items():
+                if estava:
+                    tipo, alvo = self.acoes.get(nome, ("indefinido", ""))
+                    est.eventos_novos.append(f"{nome.upper()} [0%] -> {alvo} SOLTO")
+            self._estado_anterior_dobrado = {nome: False for nome in DEDOS}
+            self._marcos_suaves = None
+            self._palma_ant = None
+            self._t_palma_ant = None
+            self._punho_fechado = False
+            self._cont_libera_punho = 0
+
+        # Processamento biométrico de ações faciais (Overwatch Specials & Ultimate)
+        if estado_rosto is not None and estado_rosto.tem_rosto:
+            est.rosto_ativo = True
+            est.ear_dir = estado_rosto.ear_dir
+            est.ear_esq = estado_rosto.ear_esq
+            est.mar = estado_rosto.mar
+            est.piscadela_direita = estado_rosto.piscadela_direita
+            est.piscadela_esquerda = estado_rosto.piscadela_esquerda
+            est.boca_aberta = estado_rosto.boca_aberta
+            est.piscando_ambos = getattr(estado_rosto, "piscando_ambos", False)
+
+            gestos_rosto = {
+                "olho_direito": estado_rosto.piscadela_direita,
+                "olho_esquerdo": estado_rosto.piscadela_esquerda,
+                "boca": estado_rosto.boca_aberta,
+            }
+
+            for gesto, ativo in gestos_rosto.items():
+                estava = self._estado_anterior_rosto.get(gesto, False)
+                tipo, alvo = self.acoes_rosto.get(gesto, ("indefinido", ""))
+                if ativo and not estava:
+                    est.eventos_novos.append(f"ROSTO [{gesto.upper()}] -> {alvo} LIGADO")
+                elif not ativo and estava:
+                    est.eventos_novos.append(f"ROSTO [{gesto.upper()}] -> {alvo} SOLTO")
+
+                if ativo:
+                    if tipo == "tecla":
+                        est.teclas.add(alvo)
+                    elif tipo == "botao":
+                        est.botoes.add(alvo)
+
+            self._estado_anterior_rosto = gestos_rosto
+        else:
+            est.rosto_ativo = False
+            for gesto, estava in self._estado_anterior_rosto.items():
+                if estava:
+                    tipo, alvo = self.acoes_rosto.get(gesto, ("indefinido", ""))
+                    est.eventos_novos.append(f"ROSTO [{gesto.upper()}] -> {alvo} SOLTO")
+            self._estado_anterior_rosto = {k: False for k in self._estado_anterior_rosto}
 
         self._estado_anterior_teclas = est.teclas.copy()
         self._estado_anterior_botoes = est.botoes.copy()
