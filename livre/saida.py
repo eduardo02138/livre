@@ -26,8 +26,29 @@ TECLAS = {
 }
 BOTOES = {"ESQUERDO": e.BTN_LEFT, "DIREITO": e.BTN_RIGHT}
 
-CAPS = {
+# DOIS dispositivos, nao um.
+#
+# Um unico no evdev anunciando EV_REL junto com KEY_W..KEY_R recebe do kernel
+# 'Handlers=kbd event mouse' e do udev ID_INPUT_MOUSE=1 E ID_INPUT_KEY=1 ao
+# mesmo tempo. Nenhum hardware real faz isso: mesmo um combo teclado+mouse com
+# um so receptor USB se apresenta como dois dispositivos separados. SDL e as
+# camadas de input dos jogos classificam cada dispositivo em UM papel, e o no
+# hibrido fica ambiguo — funciona na area de trabalho, onde o compositor le os
+# eventos crus, e some dentro do jogo.
+#
+# Separar reproduz a convencao que o hardware real segue. Os nomes continuam
+# dizendo que sao virtuais; a mudanca e de forma, nao de disfarce.
+CAPS_MOUSE = {
     e.EV_REL: [e.REL_X, e.REL_Y, e.REL_WHEEL],
+    e.EV_KEY: list(BOTOES.values()),
+}
+CAPS_TECLADO = {
+    e.EV_KEY: list(TECLAS.values()),
+}
+
+# Mantido para compatibilidade com quem importava CAPS.
+CAPS = {
+    e.EV_REL: CAPS_MOUSE[e.EV_REL],
     e.EV_KEY: list(TECLAS.values()) + list(BOTOES.values()),
 }
 
@@ -53,12 +74,20 @@ class Saida:
 
     def __init__(self, nome="mao-virtual", espera=1.2, tempo_limite=TEMPO_LIMITE_S):
         try:
-            self._ui = UInput(CAPS, name=nome, version=1)
+            self._ui_mouse = UInput(CAPS_MOUSE, name=f"{nome} mouse", version=1)
+            self._ui_teclado = UInput(CAPS_TECLADO, name=f"{nome} teclado", version=1)
         except PermissionError as ex:
             raise SemPermissao(
                 "sem escrita em /dev/uinput. confira com: getfacl /dev/uinput\n"
                 "deve haver uma linha 'user:<voce>:rw-'"
             ) from ex
+
+        # Roteia cada codigo para o dispositivo certo.
+        self._dev_do_codigo = {}
+        for cod in CAPS_MOUSE[e.EV_KEY]:
+            self._dev_do_codigo[cod] = self._ui_mouse
+        for cod in CAPS_TECLADO[e.EV_KEY]:
+            self._dev_do_codigo[cod] = self._ui_teclado
 
         # O compositor leva um instante para reconhecer o dispositivo novo;
         # sem esta pausa os primeiros eventos somem sem erro nenhum.
@@ -152,10 +181,10 @@ class Saida:
 
         moveu = False
         if px:
-            self._ui.write(e.EV_REL, e.REL_X, px)
+            self._ui_mouse.write(e.EV_REL, e.REL_X, px)
             moveu = True
         if py:
-            self._ui.write(e.EV_REL, e.REL_Y, py)
+            self._ui_mouse.write(e.EV_REL, e.REL_Y, py)
             moveu = True
 
         alvo = set()
@@ -166,23 +195,33 @@ class Saida:
             if b in BOTOES:
                 alvo.add(BOTOES[b])
 
+        tocados = set()
         for cod in alvo - self._ligados:
-            self._ui.write(e.EV_KEY, cod, 1)
+            dev = self._dev_do_codigo[cod]
+            dev.write(e.EV_KEY, cod, 1)
+            tocados.add(dev)
         for cod in self._ligados - alvo:
-            self._ui.write(e.EV_KEY, cod, 0)
+            dev = self._dev_do_codigo[cod]
+            dev.write(e.EV_KEY, cod, 0)
+            tocados.add(dev)
 
-        if moveu or alvo != self._ligados:
-            self._ui.syn()
+        if moveu:
+            tocados.add(self._ui_mouse)
+        for dev in tocados:
+            dev.syn()
         self._ligados = alvo
 
     def soltar_tudo(self):
         with self._lock:
             if self._fechado:
                 return
+            tocados = set()
             for cod in self._ligados:
-                self._ui.write(e.EV_KEY, cod, 0)
-            if self._ligados:
-                self._ui.syn()
+                dev = self._dev_do_codigo[cod]
+                dev.write(e.EV_KEY, cod, 0)
+                tocados.add(dev)
+            for dev in tocados:
+                dev.syn()
             self._ligados = set()
             self._resto_x = self._resto_y = 0.0
 
@@ -192,7 +231,8 @@ class Saida:
                 return
             self.soltar_tudo()
             self._fechado = True
-            self._ui.close()
+            self._ui_mouse.close()
+            self._ui_teclado.close()
 
         for s, anterior in self._sinais_anteriores.items():
             try:
