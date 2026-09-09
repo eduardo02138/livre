@@ -42,7 +42,20 @@ DESLOC_Y_ROI = -0.5
 
 LIMIAR_PALMA = 0.45
 LIMIAR_MARCOS = 0.50
-MIN_ROI_PIXELS = 130.0  # Mão a 35-70cm em 640x480 tem >200px. Menor que 130px é ruído de fundo.
+# Piso de tamanho para candidato do detector de palma, como FRACAO DA ALTURA
+# do quadro — nao em pixels absolutos, que sao validos so em 640x480.
+#
+# Serve para descartar sombra e dobra de roupa, que apareciam com 47-68px em
+# 480 de altura (10-14%). Ficou em 27% (130px) por um tempo e isso era
+# apertado demais: com a mao a ~60cm da camera o candidato legitimo cai perto
+# de 130px e comeca a ser rejeitado, o detector devolve None, e o rastreio
+# entra em ciclo de redeteccao — 6,4 por segundo, que na tela aparece como
+# esqueleto travando.
+#
+# 19% (90px em 480) fica acima do ruido de fundo com folga e recupera a faixa
+# de distancia em que a mao realmente e usada.
+MIN_ROI_FRACAO_ALTURA = 0.19
+MIN_ROI_PIXELS = 130.0  # mantido para compatibilidade; use _min_roi_px()
 
 
 def _ancoras():
@@ -130,6 +143,10 @@ class RastreadorONNX:
 
     # ---------------------------------------------------------------- palma
 
+    def _min_roi_px(self):
+        """Piso do candidato de palma, em pixels, para a resolucao atual."""
+        return MIN_ROI_FRACAO_ALTURA * float(self._h or 480)
+
     def _detectar_palma(self, quadro):
         """Roda o detector na cena inteira. Devolve ROI em pixels ou None."""
         h, w = quadro.shape[:2]
@@ -167,7 +184,7 @@ class RastreadorONNX:
         while restantes.size:
             i = restantes[0]
             lado_roi = max(bw[i], bh[i]) * lado * ESCALA_ROI
-            if lado_roi >= MIN_ROI_PIXELS:
+            if lado_roi >= self._min_roi_px():
                 mantidos.append(i)
             if restantes.size == 1:
                 break
