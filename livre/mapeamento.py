@@ -23,32 +23,12 @@ from .biomecanica import (  # noqa: F401  reexportado por compatibilidade
     flexao_dedo,
     flexao_polegar,
 )
-
-LIMIARES_INDIVIDUAIS = {
-    "indicador": (0.62, 0.36),  # W (ou ação remapeada)
-    "medio":     (0.62, 0.36),  # S
-    "polegar":   (0.62, 0.38),  # Clique Esquerdo
-    "mindinho":  (0.58, 0.34),  # Clique Direito (sensibilidade calibrada)
-    "anelar":    (0.65, 0.38),  # E
-}
-
-# Perfil 1: Mapeamento Direto
-PERFIL_DIRETO = {
-    "indicador": ("tecla", "W"),
-    "medio":     ("tecla", "S"),
-    "polegar":   ("botao", "ESQUERDO"),
-    "mindinho":  ("botao", "DIREITO"),
-    "anelar":    ("tecla", "E"),
-}
-
-# Perfil 2: Modo Híbrido
-PERFIL_HIBRIDO = {
-    "polegar":   ("botao", "ESQUERDO"),
-    "mindinho":  ("botao", "DIREITO"),
-    "indicador": ("tecla", "E"),
-    "anelar":    ("tecla", "F"),
-    "medio":     ("modo", "MOVIMENTO"),
-}
+from .perfis import (  # noqa: F401  reexportado por compatibilidade
+    LIMIARES_INDIVIDUAIS,
+    PERFIL_DIRETO,
+    PERFIL_HIBRIDO,
+    perfil_por_nome,
+)
 
 
 # Janela da mediana movel sobre a flexao. Em 5 quadros (~170 ms a 30 fps),
@@ -108,7 +88,7 @@ class Mapeador:
         self._fx = OneEuro()
         self._fy = OneEuro()
         self.perfil_nome = perfil_padrao
-        self.acoes = PERFIL_DIRETO if perfil_padrao == "DIRETO" else PERFIL_HIBRIDO
+        self.acoes = perfil_por_nome(perfil_padrao)
 
         # Histerese individualizada com ajuste dinamico global
         self.offset_sensibilidade = 0.0
@@ -199,10 +179,10 @@ class Mapeador:
     def trocar_perfil(self):
         if self.perfil_nome == "DIRETO":
             self.perfil_nome = "HIBRIDO"
-            self.acoes = PERFIL_HIBRIDO
+            self.acoes = perfil_por_nome("HIBRIDO")
         else:
             self.perfil_nome = "DIRETO"
-            self.acoes = PERFIL_DIRETO
+            self.acoes = perfil_por_nome("DIRETO")
         return self.perfil_nome
 
     def recentrar(self, marcos):
