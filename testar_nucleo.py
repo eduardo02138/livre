@@ -15,7 +15,8 @@ import sys
 import time
 
 from livre.fonte import MaoSintetica
-from livre.mapeamento import DEDOS, PERFIL_DIRETO, PERFIL_HIBRIDO, Mapeador
+from livre.mapeamento import (DEDOS, PERFIL_DIRETO, PERFIL_HIBRIDO, TAMANHO_MEDIANA,
+                               Mapeador)
 
 HZ = 30.0
 CURVA_FORTE = 0.95
@@ -82,8 +83,13 @@ def verificar_dedos(nome_perfil, perfil):
     # o que elimina pulso de ruido de 1 quadro. O teste tem de alimentar essa
     # janela — chamar o mapeador uma unica vez nunca aciona nada. Derivado do
     # proprio valor para nao quebrar de novo se a janela mudar.
+    # Alem da confirmacao, a mediana movel guarda TAMANHO_MEDIANA quadros por
+    # dedo, e essa janela sobrevive entre um dedo e o proximo. Sem descarregar
+    # as duas, o dedo anterior continua "dobrado" na janela e suas acoes vazam
+    # para o teste seguinte — o sintoma e um deslocamento de um dedo em toda a
+    # tabela de resultados.
     janela = max((getattr(h, "quadros_confirmacao", 1)
-                  for h in mapeador._hist.values()), default=1)
+                  for h in mapeador._hist.values()), default=1) + TAMANHO_MEDIANA
 
     print(f"\n  perfil {nome_perfil}")
     for dedo in DEDOS:
