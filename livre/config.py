@@ -26,7 +26,7 @@ ACOES_DISPONIVEIS = [
 
 CONFIG_PADRAO = {
     "dedos": {
-        "polegar":   {"tipo": "botao", "alvo": "ESQUERDO", "aciona": 0.48, "libera": 0.28},
+        "polegar":   {"tipo": "botao", "alvo": "ESQUERDO", "aciona": 0.55, "libera": 0.35},
         "indicador": {"tipo": "tecla", "alvo": "W",        "aciona": 0.48, "libera": 0.28},
         "medio":     {"tipo": "tecla", "alvo": "S",        "aciona": 0.50, "libera": 0.30},
         "anelar":    {"tipo": "tecla", "alvo": "E",        "aciona": 0.62, "libera": 0.42},

@@ -13,7 +13,7 @@ from datetime import datetime
 
 
 class GravadorTelemetria:
-    def __init__(self, diretorio_base=None, taxa_hz=10.0):
+    def __init__(self, diretorio_base=None, taxa_hz=10.0, gravar_video=True, largura=640, altura=480, fps_video=30.0):
         if diretorio_base is None:
             raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             diretorio_base = os.path.join(raiz, "telemetria")
@@ -30,11 +30,34 @@ class GravadorTelemetria:
         self.caminho_csv = os.path.join(self.pasta, f"dados_{self.id_sessao}.csv")
         self.caminho_log = os.path.join(self.pasta, f"eventos_{self.id_sessao}.log")
         self.caminho_resumo = os.path.join(self.pasta, f"resumo_{self.id_sessao}.txt")
+        self.caminho_video_limpo = os.path.join(self.pasta, f"video_limpo_{self.id_sessao}.mp4")
+        self.caminho_video_anotado = os.path.join(self.pasta, f"video_anotado_{self.id_sessao}.mp4")
 
         # Abre arquivos com flush imediato
         self._f_log = open(self.caminho_log, "w", encoding="utf-8", buffering=1)
         self._f_csv = open(self.caminho_csv, "w", encoding="utf-8", newline="", buffering=1)
         self._csv_writer = csv.writer(self._f_csv)
+
+        # Inicialização dos gravadores de vídeo duplo (limpo + anotado)
+        self.gravar_video = gravar_video
+        self._writer_limpo = None
+        self._writer_anotado = None
+
+        if self.gravar_video:
+            try:
+                import cv2
+                fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                self._writer_limpo = cv2.VideoWriter(self.caminho_video_limpo, fourcc, fps_video, (largura, altura))
+                self._writer_anotado = cv2.VideoWriter(self.caminho_video_anotado, fourcc, fps_video, (largura, altura))
+                if not self._writer_limpo.isOpened() or not self._writer_anotado.isOpened():
+                    self.gravar_video = False
+                else:
+                    print(f"🎬 Gravação de telemetria em vídeo duplo ativada:")
+                    print(f"   • Câmera limpa:  {os.path.basename(self.caminho_video_limpo)}")
+                    print(f"   • Tela anotada:  {os.path.basename(self.caminho_video_anotado)}")
+            except Exception as e:
+                print(f"⚠️ Aviso ao inicializar vídeo duplo: {e}")
+                self.gravar_video = False
 
         # Cabeçalho CSV
         self._csv_writer.writerow([

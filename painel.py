@@ -117,6 +117,54 @@ class HUD:
             cv2.putText(tela, f"{int(mag)}px/s", (px + 10, py + 4),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.40, (0, 215, 255), 1, cv2.LINE_AA)
 
+    def desenhar_guia_biometria(self, tela, tem_mao, tempo_vinculado=0.0):
+        """Desenha a moldura de centralização biométrica (estilo FaceID / enquadramento)."""
+        cx = self.w // 2
+        cy = int(self.h * 0.52)
+        bw = 250
+        bh = 300
+        x1, y1 = cx - bw // 2, cy - bh // 2
+        x2, y2 = cx + bw // 2, cy + bh // 2
+        tamanho_canto = 35
+
+        if not tem_mao:
+            cor = (0, 215, 255)  # Amarelo/Dourado de busca
+            # Cantos da moldura
+            for px, py, dx, dy in [
+                (x1, y1, 1, 1), (x2, y1, -1, 1),
+                (x1, y2, 1, -1), (x2, y2, -1, -1)
+            ]:
+                cv2.line(tela, (px, py), (px + dx * tamanho_canto, py), cor, 2, cv2.LINE_AA)
+                cv2.line(tela, (px, py), (px, py + dy * tamanho_canto), cor, 2, cv2.LINE_AA)
+
+            # Ponto de mira central
+            cv2.drawMarker(tela, (cx, cy), (100, 150, 180), cv2.MARKER_CROSS, 20, 1, cv2.LINE_AA)
+            cv2.ellipse(tela, (cx, cy), (bw // 2 - 10, bh // 2 - 10), 0, 0, 360, (50, 80, 100), 1, cv2.LINE_AA)
+
+            # Textos de instrução
+            cv2.putText(tela, "[ ENQUADRE SUA MAO AQUI ]", (cx - 130, y1 - 18),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.48, (0, 255, 255), 1, cv2.LINE_AA)
+            cv2.putText(tela, "Distancia ideal: 40 a 55 cm  |  Iluminacao adequada", (cx - 165, y2 + 25),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.38, (180, 180, 200), 1, cv2.LINE_AA)
+        else:
+            # Mão detectada! Se vinculou recentemente (< 2.5s), exibe confirmação visual
+            if tempo_vinculado < 2.5:
+                cor_ok = (0, 255, 120)
+                for px, py, dx, dy in [
+                    (x1, y1, 1, 1), (x2, y1, -1, 1),
+                    (x1, y2, 1, -1), (x2, y2, -1, -1)
+                ]:
+                    cv2.line(tela, (px, py), (px + dx * tamanho_canto, py), cor_ok, 2, cv2.LINE_AA)
+                    cv2.line(tela, (px, py), (px, py + dy * tamanho_canto), cor_ok, 2, cv2.LINE_AA)
+
+                cv2.putText(tela, "MAO VINCULADA COM SUCESSO!", (cx - 140, y1 - 18),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.48, cor_ok, 1, cv2.LINE_AA)
+
+            # Badge discreto permanente no topo direito
+            cv2.circle(tela, (self.w - 180, 25), 5, (0, 255, 120), -1, cv2.LINE_AA)
+            cv2.putText(tela, "RASTREIO ATIVO", (self.w - 168, 29),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 255, 120), 1, cv2.LINE_AA)
+
     def desenhar_barras_calibracao(self, tela, flexoes, config, dedo_selecionado):
         """Desenha as barras de flexão com destaque do dedo selecionado e controles."""
         x_base = 20
@@ -357,6 +405,9 @@ def main():
     print("  • [Q]: Sair")
     print("=" * 70 + "\n")
 
+    t_inicio_vinculo = 0.0
+    ja_estava_vinculado = False
+
     try:
         while True:
             t_agora = time.time()
@@ -375,7 +426,13 @@ def main():
                 marcos = fonte_sintetica.marcos()
 
             if marcos:
+                if not ja_estava_vinculado:
+                    t_inicio_vinculo = t_agora
+                    ja_estava_vinculado = True
+                tempo_vinculado = t_agora - t_inicio_vinculo
+
                 hud.desenhar_esqueleto(tela, marcos)
+                hud.desenhar_guia_biometria(tela, tem_mao=True, tempo_vinculado=tempo_vinculado)
                 estado = mapeador(marcos, t_agora)
 
                 if estado.eventos_novos:
@@ -421,10 +478,9 @@ def main():
                 if modo_uinput and saida:
                     saida.aplicar(estado, dt)
             else:
+                ja_estava_vinculado = False
                 telemetria.registrar_quadro(fps=1.0/dt, estado=None, aciona=mapeador.aciona)
-                cv2.putText(tela, "Aguardando mao no enquadramento... [Pressione C se necessario]",
-                            (largura // 2 - 250, altura // 2),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.50, (0, 180, 255), 1, cv2.LINE_AA)
+                hud.desenhar_guia_biometria(tela, tem_mao=False, tempo_vinculado=0.0)
 
             # Desenha Central de Configuração se TAB estiver ativo
             if menu_aberto:

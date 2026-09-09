@@ -91,6 +91,12 @@ class CameraMao:
         # Espelhamento horizontal essencial
         frame = cv2.flip(frame, 1)
 
+        # Realce adaptativo em ambientes escuros (evita perda por pouca luz)
+        brilho_medio = frame.mean()
+        if brilho_medio < 50.0:
+            alpha = min(2.2, 65.0 / max(10.0, brilho_medio))
+            frame = cv2.convertScaleAbs(frame, alpha=alpha, beta=10)
+
         marcos = None
         if self.tracker_onnx:
             marcos = self.tracker_onnx.estimar_marcos(frame)

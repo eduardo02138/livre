@@ -26,7 +26,7 @@ DEDOS = {
 LIMIARES_INDIVIDUAIS = {
     "indicador": (0.48, 0.28),  # Excelente isolamento motor -> W
     "medio":     (0.50, 0.30),  # Excelente isolamento motor -> S
-    "polegar":   (0.48, 0.28),  # Oposicao da ponta -> Clique Esquerdo
+    "polegar":   (0.55, 0.35),  # Articulacao propria + oposicao -> Clique Esquerdo
     "mindinho":  (0.55, 0.35),  # Leve arrasto com anelar -> Clique Direito
     "anelar":    (0.62, 0.42),  # Tendao acoplado ao medio -> E
 }
@@ -70,9 +70,9 @@ def _angulo(a, b, c):
     return math.degrees(math.acos(max(-1.0, min(1.0, cos))))
 
 
-def flexao_dedo(marcos, dedo, aspecto=ASPECTO_PADRAO):
+def flexao_dedo(marcos_geo, dedo):
     """Calcula flexao combinando angulo articular e encurtamento em espaço isométrico."""
-    mcp, pip, dip, tip = (_desfazer_aspecto(marcos[i], aspecto) for i in dedo)
+    mcp, pip, dip, tip = (marcos_geo[i] for i in dedo)
 
     # 1. Encurtamento: razao entre distancia ponta-base e o comprimento somado dos ossos
     comp_ossos = (math.hypot(pip[0]-mcp[0], pip[1]-mcp[1]) +
@@ -92,20 +92,35 @@ def flexao_dedo(marcos, dedo, aspecto=ASPECTO_PADRAO):
     return max(0.0, min(1.0, 0.60 * f_encurtamento + 0.40 * f_angulo))
 
 
-def flexao_polegar(marcos, aspecto=ASPECTO_PADRAO):
-    """Mede a flexao do polegar em direcao a base do indicador (oposicao isométrica)."""
-    pulso = _desfazer_aspecto(marcos[0], aspecto)
-    tip = _desfazer_aspecto(marcos[4], aspecto)
-    base_indicador = _desfazer_aspecto(marcos[5], aspecto)
+def flexao_polegar(marcos_geo):
+    """Mede a flexao do polegar unindo articulacao propria (IP/MCP) e oposicao."""
+    pulso = marcos_geo[0]
+    p1, p2, p3, p4 = (marcos_geo[i] for i in (1, 2, 3, 4))
+    base_indicador = marcos_geo[5]
 
-    dist_oposta = math.hypot(tip[0] - base_indicador[0], tip[1] - base_indicador[1])
+    # 1. Curvatura da articulacao interfalangiana do polegar (nós 2-3-4)
+    ang_ip = _angulo(p2, p3, p4)
+    f_angulo = max(0.0, min(1.0, (170.0 - ang_ip) / 75.0))
+
+    # 2. Encurtamento próprio da falange do polegar (distância ponta-MCP vs soma dos ossos)
+    comp_ossos = math.hypot(p3[0] - p2[0], p3[1] - p2[1]) + math.hypot(p4[0] - p3[0], p4[1] - p3[1])
+    if comp_ossos > 1e-6:
+        dist_direta = math.hypot(p4[0] - p2[0], p4[1] - p2[1])
+        f_encurtamento = max(0.0, min(1.0, (1.0 - (dist_direta / comp_ossos)) / 0.35))
+    else:
+        f_encurtamento = 0.0
+
+    # 3. Oposicao (distancia ponta do polegar ate a base do indicador)
+    dist_oposta = math.hypot(p4[0] - base_indicador[0], p4[1] - base_indicador[1])
     comp_palma = math.hypot(base_indicador[0] - pulso[0], base_indicador[1] - pulso[1])
-    if comp_palma < 1e-6:
-        return 0.0
+    if comp_palma > 1e-6:
+        razao_op = dist_oposta / comp_palma
+        f_oposicao = max(0.0, min(1.0, (0.75 - razao_op) / 0.45))
+    else:
+        f_oposicao = 0.0
 
-    razao = dist_oposta / comp_palma
-    # Aberto: razao ~ 0.85; dobrado para clique: razao ~ 0.35..0.45
-    return max(0.0, min(1.0, (0.80 - razao) / 0.50))
+    # Fusao: 45% curvatura articular + 35% encurtamento + 20% oposicao
+    return max(0.0, min(1.0, 0.45 * f_angulo + 0.35 * f_encurtamento + 0.20 * f_oposicao))
 
 
 def centro_palma(marcos):
@@ -169,6 +184,7 @@ class Mapeador:
         self._estado_anterior_teclas = set()
         self._estado_anterior_botoes = set()
         self._estado_anterior_dobrado = {nome: False for nome in DEDOS}
+        self._marcos_suaves = None
 
     @property
     def aciona(self):
@@ -215,11 +231,21 @@ class Mapeador:
     def __call__(self, marcos, t):
         est = Estado(perfil=self.perfil_nome)
 
+        # Suavização temporal suave dos marcos (EMA alpha=0.70) para eliminar microjitter
+        if self._marcos_suaves is None or len(self._marcos_suaves) != len(marcos):
+            self._marcos_suaves = [(float(x), float(y)) for x, y in marcos]
+        else:
+            alpha = 0.70
+            self._marcos_suaves = [
+                (alpha * x + (1.0 - alpha) * sx, alpha * y + (1.0 - alpha) * sy)
+                for (x, y), (sx, sy) in zip(marcos, self._marcos_suaves)
+            ]
+
         # Os marcos chegam normalizados por LARGURA e ALTURA separadamente,
         # o que num quadro 4:3 distorce angulos — e flexao E angulo. Aqui a
         # distorcao e desfeita so para a geometria dos dedos; a mira segue
         # usando 'marcos' cru, que e o espaco em que o painel desenha.
-        marcos_geo = [(x * self.aspecto, y) for x, y in marcos]
+        marcos_geo = [(x * self.aspecto, y) for x, y in self._marcos_suaves]
 
         dobrado = {}
         for nome, idx in DEDOS.items():
