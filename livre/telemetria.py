@@ -126,6 +126,15 @@ class GravadorTelemetria:
                 agora_iso, round(fps, 1), 0, 0, 0, 0, 0, 0, 0, "", "", "", round(aciona, 2)
             ])
 
+    def gravar_quadros_video(self, frame_limpo, tela_anotada):
+        """Grava uma estampa de quadro nas duas trilhas de vídeo (limpo e anotado)."""
+        if not self.gravar_video:
+            return
+        if self._writer_limpo and frame_limpo is not None:
+            self._writer_limpo.write(frame_limpo)
+        if self._writer_anotado and tela_anotada is not None:
+            self._writer_anotado.write(tela_anotada)
+
     def fechar(self):
         """Gera o relatório resumo final da sessão e fecha os arquivos."""
         duracao = max(1.0, time.time() - self.t_inicio)
@@ -135,6 +144,14 @@ class GravadorTelemetria:
         taxa_rastreio = (self.quadros_com_mao / max(1, self.total_quadros)) * 100.0
 
         self.registrar_evento(f"Sessão encerrada. Duração: {minutos}m {segundos}s", categoria="SISTEMA")
+
+        # Libera os gravadores de vídeo MP4
+        if self._writer_limpo:
+            self._writer_limpo.release()
+            self._writer_limpo = None
+        if self._writer_anotado:
+            self._writer_anotado.release()
+            self._writer_anotado = None
 
         # Escreve o relatório final
         with open(self.caminho_resumo, "w", encoding="utf-8") as f:
@@ -175,9 +192,12 @@ class GravadorTelemetria:
                 f.write(f"  • Limiar ideal para S (Médio):     cerca de {int(sugestao_med*100)}%\n")
 
             f.write("\nArquivos gravados nesta sessão:\n")
-            f.write(f"  • Dados brutos CSV:  {os.path.basename(self.caminho_csv)}\n")
-            f.write(f"  • Log de eventos:    {os.path.basename(self.caminho_log)}\n")
-            f.write(f"  • Este resumo:       {os.path.basename(self.caminho_resumo)}\n")
+            f.write(f"  • Dados brutos CSV:     {os.path.basename(self.caminho_csv)}\n")
+            f.write(f"  • Log de eventos:       {os.path.basename(self.caminho_log)}\n")
+            if self.gravar_video:
+                f.write(f"  • Vídeo limpo (câmera): {os.path.basename(self.caminho_video_limpo)}\n")
+                f.write(f"  • Vídeo anotado (HUD):  {os.path.basename(self.caminho_video_anotado)}\n")
+            f.write(f"  • Este resumo:          {os.path.basename(self.caminho_resumo)}\n")
             f.write("=" * 65 + "\n")
 
         self._f_log.close()

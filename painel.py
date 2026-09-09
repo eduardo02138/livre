@@ -369,7 +369,7 @@ def main():
     mapeador = Mapeador()
     mapeador.aplicar_configuracao(config)
 
-    telemetria = GravadorTelemetria()
+    telemetria = GravadorTelemetria(largura=largura, altura=altura, gravar_video=True)
 
     saida = None
     modo_uinput = args.jogar
@@ -486,11 +486,17 @@ def main():
             if menu_aberto:
                 hud.desenhar_central_configuracao(tela, config, dedo_selecionado)
 
-            # FPS e indicador de gravação
+            # FPS e indicador de gravação de vídeo duplo
             fps = 1.0 / dt
             cv2.putText(tela, f"{int(fps)} FPS", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 2)
-            cv2.putText(tela, f"Gravando: telemetria/{telemetria.id_sessao}", (20, altura - 10),
+            cv2.circle(tela, (115, 24), 5, (0, 0, 255), -1, cv2.LINE_AA)
+            cv2.putText(tela, "REC VIDEO DUPLO", (126, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 120, 255), 1, cv2.LINE_AA)
+            cv2.putText(tela, f"Gravando: telemetria/{telemetria.id_sessao} (CSV + 2x MP4)", (20, altura - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.35, (130, 160, 200), 1, cv2.LINE_AA)
+
+            # Gravação contínua das duas trilhas de vídeo (limpo + anotado)
+            frame_limpo = frame if camera else tela
+            telemetria.gravar_quadros_video(frame_limpo, tela)
 
             cv2.imshow(nome_janela, tela)
             tecla = cv2.waitKey(1) & 0xFF

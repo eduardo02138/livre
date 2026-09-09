@@ -14,3 +14,9 @@ configuracao.json
 # baixar_modelos.sh — ficam fora do repositorio para nao redistribuir
 # binarios de outro projeto junto com este codigo.
 modelos/*.onnx
+
+# Video em qualquer lugar da arvore. A telemetria grava a webcam, entao um
+# arquivo desses fora de telemetria/ vazaria imagem sua num repo publico.
+*.mp4
+*.avi
+*.mkv
