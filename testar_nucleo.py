@@ -117,13 +117,14 @@ def verificar_dedos(nome_perfil, perfil):
 
 
 def verificar_mira():
-    """Palma deslocada deve gerar velocidade no sentido certo, e zero no centro."""
+    """Valida controle de mira: modo joystick (deflexão) e modo relativo (delta / deriva zero)."""
     mao = MaoSintetica()
-    mapeador = Mapeador(perfil_padrao="DIRETO")
-    mapeador.recentrar(mao.marcos())
     problemas = []
-    print("\n  mira (controle de velocidade)")
 
+    # 1. Modo Joystick (deflexão do centro)
+    print("\n  mira (controle joystick por deflexao)")
+    map_joy = Mapeador(perfil_padrao="DIRETO", modo_mouse="joystick")
+    map_joy.recentrar(mao.marcos())
     casos = [
         ("centro",          (0.00, 0.00), lambda e: abs(e.vel_x) < 1 and abs(e.vel_y) < 1),
         ("palma a direita", (0.30, 0.00), lambda e: e.vel_x > 50),
@@ -134,12 +135,35 @@ def verificar_mira():
         mao.curvas = {n: 0.0 for n in mao.curvas}
         est = None
         for i in range(45):                    # deixa o One Euro assentar
-            est = mapeador(mao.marcos(), i / HZ)
+            est = map_joy(mao.marcos(), i / HZ)
         ok = condicao(est)
         print(f"    {'ok  ' if ok else 'FALHA'} {descricao:<16} "
               f"vel=({est.vel_x:+7.1f}, {est.vel_y:+7.1f}) px/s")
         if not ok:
-            problemas.append(f"mira/{descricao}: vel=({est.vel_x:.1f}, {est.vel_y:.1f})")
+            problemas.append(f"mira/joystick/{descricao}: vel=({est.vel_x:.1f}, {est.vel_y:.1f})")
+
+    # 2. Modo Relativo (deslocamento diferencial: deriva zero quando parada)
+    print("\n  mira (modo relativo delta)")
+    map_rel = Mapeador(perfil_padrao="DIRETO", modo_mouse="relativo")
+    map_rel.recentrar(mao.marcos())
+
+    # Mão mantida estática fora do centro: DEVE parar rigorosamente em 0 px/s
+    mao.deslocamento = (0.25, 0.25)
+    for i in range(15):
+        est = map_rel(mao.marcos(), i / HZ)
+    ok_estacionario = (abs(est.vel_x) == 0.0 and abs(est.vel_y) == 0.0)
+    print(f"    {'ok  ' if ok_estacionario else 'FALHA'} mao estacionaria vel=({est.vel_x:+7.1f}, {est.vel_y:+7.1f}) px/s (deriva zero)")
+    if not ok_estacionario:
+        problemas.append(f"mira/relativo/estacionario: vel=({est.vel_x:.1f}, {est.vel_y:.1f})")
+
+    # Mão com deslocamento dinâmico: DEVE gerar velocidade proporcional ao delta
+    mao.deslocamento = (0.25 + 0.06, 0.25)
+    est_mov = map_rel(mao.marcos(), 16 / HZ)
+    ok_mov = est_mov.vel_x > 50
+    print(f"    {'ok  ' if ok_mov else 'FALHA'} movimento dinamico vel=({est_mov.vel_x:+7.1f}, {est_mov.vel_y:+7.1f}) px/s")
+    if not ok_mov:
+        problemas.append(f"mira/relativo/movimento: vel=({est_mov.vel_x:.1f}, {est_mov.vel_y:.1f})")
+
     return problemas
 
 

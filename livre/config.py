@@ -26,13 +26,15 @@ ACOES_DISPONIVEIS = [
 
 CONFIG_PADRAO = {
     "dedos": {
-        "polegar":   {"tipo": "botao", "alvo": "ESQUERDO", "aciona": 0.55, "libera": 0.35},
-        "indicador": {"tipo": "tecla", "alvo": "W",        "aciona": 0.48, "libera": 0.28},
-        "medio":     {"tipo": "tecla", "alvo": "S",        "aciona": 0.50, "libera": 0.30},
-        "anelar":    {"tipo": "tecla", "alvo": "E",        "aciona": 0.62, "libera": 0.42},
-        "mindinho":  {"tipo": "botao", "alvo": "DIREITO",  "aciona": 0.55, "libera": 0.35},
+        "polegar":   {"tipo": "botao", "alvo": "ESQUERDO", "aciona": 0.68, "libera": 0.45},
+        "indicador": {"tipo": "tecla", "alvo": "W",        "aciona": 0.68, "libera": 0.42},
+        "medio":     {"tipo": "tecla", "alvo": "S",        "aciona": 0.68, "libera": 0.42},
+        "anelar":    {"tipo": "tecla", "alvo": "E",        "aciona": 0.72, "libera": 0.48},
+        "mindinho":  {"tipo": "botao", "alvo": "DIREITO",  "aciona": 0.70, "libera": 0.45},
     },
     "mouse": {
+        "modo": "relativo",
+        "sensibilidade": 1800.0,
         "vel_max": 900.0,
         "zona_morta": 0.20,
         "expo": 2.0,
@@ -106,12 +108,23 @@ class Configuracao:
         self.salvar()
         return novo_tipo, novo_alvo
 
-    def ajustar_mouse(self, delta_vel=0, delta_zm=0):
-        """Ajusta parâmetros de sensibilidade da mira do mouse."""
-        m = self.dados["mouse"]
-        if delta_vel != 0:
-            m["vel_max"] = max(200.0, min(2500.0, m["vel_max"] + delta_vel))
-        if delta_zm != 0:
-            m["zona_morta"] = max(0.05, min(0.40, round(m["zona_morta"] + delta_zm, 2)))
+    def alternar_modo_mouse(self):
+        """Alterna entre 'relativo' (delta) e 'joystick' (velocidade)."""
+        m = self.dados.setdefault("mouse", {})
+        modo_atual = m.get("modo", "relativo")
+        novo_modo = "joystick" if modo_atual == "relativo" else "relativo"
+        m["modo"] = novo_modo
         self.salvar()
-        return m["vel_max"], m["zona_morta"]
+        return novo_modo
+
+    def ajustar_mouse(self, delta_vel=0, delta_zm=0, delta_sens=0):
+        """Ajusta parâmetros de sensibilidade da mira do mouse."""
+        m = self.dados.setdefault("mouse", {})
+        if delta_vel != 0:
+            m["vel_max"] = max(200.0, min(2500.0, m.get("vel_max", 900.0) + delta_vel))
+        if delta_zm != 0:
+            m["zona_morta"] = max(0.05, min(0.40, round(m.get("zona_morta", 0.20) + delta_zm, 2)))
+        if delta_sens != 0:
+            m["sensibilidade"] = max(400.0, min(5000.0, m.get("sensibilidade", 1800.0) + delta_sens))
+        self.salvar()
+        return m.get("vel_max", 900.0), m.get("zona_morta", 0.20), m.get("sensibilidade", 1800.0)

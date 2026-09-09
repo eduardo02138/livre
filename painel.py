@@ -95,27 +95,37 @@ class HUD:
             else:
                 cv2.circle(tela, pt, 4, (40, 180, 240), -1, cv2.LINE_AA)
 
-    def desenhar_vetor_mira(self, tela, centro_repouso, pos_palma, vel_x, vel_y, modo_movimento, zona_morta=0.15):
-        cx_rep = int(centro_repouso[0] * self.w)
-        cy_rep = int(centro_repouso[1] * self.h)
-        raio_zm = int((zona_morta / 2.0) * min(self.w, self.h))
-
-        cv2.circle(tela, (cx_rep, cy_rep), raio_zm, (70, 70, 90), 1, cv2.LINE_AA)
-        cv2.circle(tela, (cx_rep, cy_rep), 4, (120, 120, 140), -1, cv2.LINE_AA)
-        cv2.putText(tela, "REPOUSO [C]", (cx_rep - 38, cy_rep - raio_zm - 6),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, (140, 140, 160), 1, cv2.LINE_AA)
-
+    def desenhar_vetor_mira(self, tela, centro_repouso, pos_palma, vel_x, vel_y, modo_movimento, zona_morta=0.15, modo_mouse="relativo"):
         px = int(pos_palma[0] * self.w)
         py = int(pos_palma[1] * self.h)
-
-        cor_vetor = (0, 215, 255) if not modo_movimento else (0, 255, 100)
-        cv2.line(tela, (cx_rep, cy_rep), (px, py), cor_vetor, 2, cv2.LINE_AA)
-        cv2.circle(tela, (px, py), 5, cor_vetor, -1, cv2.LINE_AA)
-
         mag = math.hypot(vel_x, vel_y)
-        if mag > 1.0:
-            cv2.putText(tela, f"{int(mag)}px/s", (px + 10, py + 4),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.40, (0, 215, 255), 1, cv2.LINE_AA)
+
+        if modo_mouse == "joystick":
+            cx_rep = int(centro_repouso[0] * self.w)
+            cy_rep = int(centro_repouso[1] * self.h)
+            raio_zm = int((zona_morta / 2.0) * min(self.w, self.h))
+
+            cv2.circle(tela, (cx_rep, cy_rep), raio_zm, (70, 70, 90), 1, cv2.LINE_AA)
+            cv2.circle(tela, (cx_rep, cy_rep), 4, (120, 120, 140), -1, cv2.LINE_AA)
+            cv2.putText(tela, "REPOUSO [C]", (cx_rep - 38, cy_rep - raio_zm - 6),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.35, (140, 140, 160), 1, cv2.LINE_AA)
+
+            cor_vetor = (0, 215, 255) if not modo_movimento else (0, 255, 100)
+            cv2.line(tela, (cx_rep, cy_rep), (px, py), cor_vetor, 2, cv2.LINE_AA)
+            cv2.circle(tela, (px, py), 5, cor_vetor, -1, cv2.LINE_AA)
+
+            if mag > 1.0:
+                cv2.putText(tela, f"{int(mag)}px/s (JOYSTICK)", (px + 10, py + 4),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.40, (0, 215, 255), 1, cv2.LINE_AA)
+        else:
+            cor_ponto = (0, 255, 120) if mag < 1.0 else (0, 215, 255)
+            cv2.circle(tela, (px, py), 5, cor_ponto, -1, cv2.LINE_AA)
+            if mag < 1.0:
+                cv2.putText(tela, "MOUSE PARADO (0 px/s)", (px + 10, py + 4),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.40, (0, 255, 120), 1, cv2.LINE_AA)
+            else:
+                cv2.putText(tela, f"{int(mag)}px/s (RELATIVO)", (px + 10, py + 4),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.40, (0, 215, 255), 1, cv2.LINE_AA)
 
     def desenhar_guia_biometria(self, tela, tem_mao, tempo_vinculado=0.0):
         """Desenha a moldura de centralização biométrica (estilo FaceID / enquadramento)."""
@@ -332,14 +342,18 @@ class HUD:
         y_item += 40
         cv2.line(tela, (x1 + 20, y_item - 12), (x2 - 20, y_item - 12), (70, 90, 110), 1)
         m = config.dados.get("mouse", {})
-        cv2.putText(tela, f"MIRA DO MOUSE: Vel. Máxima: {int(m.get('vel_max', 900))} px/s [< / >]  |  Zona Morta: {int(m.get('zona_morta', 0.15)*100)}% [Z]",
-                    (x1 + 30, y_item + 6), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (0, 215, 255), 1, cv2.LINE_AA)
+        modo_m = m.get("modo", "relativo").upper()
+        if modo_m == "RELATIVO":
+            txt_mouse = f"MOUSE: MODO [{modo_m}] [M]  |  Sensibilidade: {int(m.get('sensibilidade', 1800))} [< / >]"
+        else:
+            txt_mouse = f"MOUSE: MODO [{modo_m}] [M]  |  Vel. Max: {int(m.get('vel_max', 900))} px/s [< / >]  |  ZM: {int(m.get('zona_morta', 0.20)*100)}% [Z]"
+        cv2.putText(tela, txt_mouse, (x1 + 30, y_item + 6), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (0, 215, 255), 1, cv2.LINE_AA)
 
         # Rodapé de Ajuda
         y_item += 40
         cv2.rectangle(tela, (x1 + 20, y_item - 10), (x2 - 20, y_item + 25), (25, 30, 42), -1)
-        cv2.putText(tela, "[1-5]: Seleciona Dedo  |  [A]: Troca Ação  |  [+/-]: Sensibilidade  |  [TAB]: Fechar",
-                    (x1 + 28, y_item + 12), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 255, 255), 1, cv2.LINE_AA)
+        cv2.putText(tela, "[1-5]: Dedo  |  [A]: Troca Acao (c/ menu)  |  [+/-]: Sens.  |  [M]: Modo Mouse  |  [TAB]: Fechar",
+                    (x1 + 24, y_item + 12), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (0, 255, 255), 1, cv2.LINE_AA)
 
 
 def main():
@@ -398,8 +412,9 @@ def main():
     print("  • Pressione [TAB] para abrir a Central de Configuração na tela")
     print("  • [1] a [5]: Seleciona o dedo para calibrar")
     print("  • [+] / [-]: Altera sensibilidade do dedo selecionado")
-    print("  • [A]: Cicla a tecla/ação do dedo selecionado")
-    print("  • [<] / [>]: Velocidade do mouse | [Z]: Zona morta")
+    print("  • [A]: Cicla a tecla/ação do dedo selecionado (com [TAB] aberto)")
+    print("  • [M]: Alternar modo do mouse (Relativo vs Joystick)")
+    print("  • [<] / [>]: Sensibilidade / Velocidade do mouse | [Z]: Zona morta")
     print("  • [C] ou [R]: Recentralizar e re-travar rastreador na mão")
     print("  • [J]: Alternar saída uinput (Modo Jogo)")
     print("  • [Q]: Sair")
@@ -426,33 +441,43 @@ def main():
                 marcos = fonte_sintetica.marcos()
 
             if marcos:
-                if not ja_estava_vinculado:
-                    t_inicio_vinculo = t_agora
-                    ja_estava_vinculado = True
-                    mapeador.recentrar(marcos)
-                    telemetria.registrar_evento(f"Centro do mouse auto-calibrado na postura da mao: ({mapeador.centro[0]:.2f}, {mapeador.centro[1]:.2f})", categoria="CALIB")
-                tempo_vinculado = t_agora - t_inicio_vinculo
+                cx_p, cy_p = centro_palma(marcos)
+                # Só vincula pela primeira vez se a mão estiver na região central segura
+                pode_vincular = (0.18 <= cx_p <= 0.82 and 0.15 <= cy_p <= 0.85) if not ja_estava_vinculado else True
+                if not pode_vincular:
+                    hud.desenhar_esqueleto(tela, marcos)
+                    hud.desenhar_guia_biometria(tela, tem_mao=False, tempo_vinculado=0.0)
+                    cv2.putText(tela, "POSICIONE A MAO NO CENTRO PARA VINCULAR", (largura // 2 - 200, 45),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.46, (0, 255, 255), 1, cv2.LINE_AA)
+                else:
+                    if not ja_estava_vinculado:
+                        t_inicio_vinculo = t_agora
+                        ja_estava_vinculado = True
+                        mapeador.recentrar(marcos)
+                        telemetria.registrar_evento(f"Centro do mouse auto-calibrado na postura da mao: ({mapeador.centro[0]:.2f}, {mapeador.centro[1]:.2f})", categoria="CALIB")
+                    tempo_vinculado = t_agora - t_inicio_vinculo
 
-                hud.desenhar_esqueleto(tela, marcos)
-                hud.desenhar_guia_biometria(tela, tem_mao=True, tempo_vinculado=tempo_vinculado)
-                estado = mapeador(marcos, t_agora)
+                    hud.desenhar_esqueleto(tela, marcos)
+                    hud.desenhar_guia_biometria(tela, tem_mao=True, tempo_vinculado=tempo_vinculado)
+                    estado = mapeador(marcos, t_agora)
 
-                if estado.eventos_novos:
-                    hud.registrar_eventos(estado.eventos_novos)
-                    for ev in estado.eventos_novos:
-                        telemetria.registrar_evento(ev, categoria="ACAO")
+                    if estado.eventos_novos:
+                        hud.registrar_eventos(estado.eventos_novos)
+                        for ev in estado.eventos_novos:
+                            telemetria.registrar_evento(ev, categoria="ACAO")
 
-                telemetria.registrar_quadro(fps=1.0/dt, estado=estado, aciona=mapeador.aciona)
+                    telemetria.registrar_quadro(fps=1.0/dt, estado=estado, aciona=mapeador.aciona)
 
-                hud.desenhar_vetor_mira(
-                    tela,
-                    centro_repouso=mapeador.centro,
-                    pos_palma=estado.palma,
-                    vel_x=estado.vel_x,
-                    vel_y=estado.vel_y,
-                    modo_movimento=estado.modo_movimento,
-                    zona_morta=mapeador.zona_morta
-                )
+                    hud.desenhar_vetor_mira(
+                        tela,
+                        centro_repouso=mapeador.centro,
+                        pos_palma=estado.palma,
+                        vel_x=estado.vel_x,
+                        vel_y=estado.vel_y,
+                        modo_movimento=estado.modo_movimento,
+                        zona_morta=mapeador.zona_morta,
+                        modo_mouse=mapeador.modo_mouse,
+                    )
 
                 hud.desenhar_barras_calibracao(tela, estado.flexoes, config, dedo_selecionado)
                 hud.desenhar_painel_teclas(tela, estado.teclas, estado.botoes, modo_uinput, mapeador.perfil_nome)
@@ -536,10 +561,13 @@ def main():
                 dedo_selecionado = "mindinho"
                 print(f"\n👉 Dedo selecionado: MINDINHO")
             elif tecla in (ord('a'), ord('A')):
-                novo_tipo, novo_alvo = config.ciclo_acao(dedo_selecionado)
-                mapeador.aplicar_configuracao(config)
-                telemetria.registrar_evento(f"{dedo_selecionado.upper()} remapeado para {novo_alvo} ({novo_tipo})", categoria="CONFIG")
-                print(f"\n🎮 {dedo_selecionado.upper()} remapeado para: [{novo_alvo}] ({novo_tipo})")
+                if menu_aberto:
+                    novo_tipo, novo_alvo = config.ciclo_acao(dedo_selecionado)
+                    mapeador.aplicar_configuracao(config)
+                    telemetria.registrar_evento(f"{dedo_selecionado.upper()} remapeado para {novo_alvo} ({novo_tipo})", categoria="CONFIG")
+                    print(f"\n🎮 {dedo_selecionado.upper()} remapeado para: [{novo_alvo}] ({novo_tipo})")
+                else:
+                    print(f"\n⚠️  Para remapear ações com [A], abra primeiro a central com [TAB].")
             elif tecla in (ord('+'), ord('=')):
                 ac, lib = config.ajustar_limiar(dedo_selecionado, -0.03)
                 mapeador.aplicar_configuracao(config)
@@ -550,19 +578,36 @@ def main():
                 mapeador.aplicar_configuracao(config)
                 telemetria.registrar_evento(f"{dedo_selecionado.upper()} sensibilidade diminuida: {int(ac*100)}%", categoria="CONFIG")
                 print(f"\n⬇️ {dedo_selecionado.upper()} sensibilidade DIMINUÍDA: aciona={int(ac*100)}% libera={int(lib*100)}%")
+            elif tecla in (ord('m'), ord('M')):
+                novo_modo = config.alternar_modo_mouse()
+                mapeador.aplicar_configuracao(config)
+                telemetria.registrar_evento(f"Modo do mouse alternado para: {novo_modo.upper()}", categoria="MODO")
+                print(f"\n🖱️ Modo do Mouse alterado para: [{novo_modo.upper()}]")
             elif tecla in (ord(','), ord('<')):
-                vel, _ = config.ajustar_mouse(delta_vel=-50)
-                mapeador.aplicar_configuracao(config)
-                telemetria.registrar_evento(f"Velocidade mouse: {int(vel)} px/s", categoria="CONFIG")
-                print(f"\n🖱️ Velocidade Mouse: {int(vel)} px/s")
+                if mapeador.modo_mouse == "relativo":
+                    _, _, sens = config.ajustar_mouse(delta_sens=-100)
+                    mapeador.aplicar_configuracao(config)
+                    telemetria.registrar_evento(f"Sensibilidade mouse: {int(sens)}", categoria="CONFIG")
+                    print(f"\n🖱️ Sensibilidade Mouse: {int(sens)}")
+                else:
+                    vel, _, _ = config.ajustar_mouse(delta_vel=-50)
+                    mapeador.aplicar_configuracao(config)
+                    telemetria.registrar_evento(f"Velocidade mouse: {int(vel)} px/s", categoria="CONFIG")
+                    print(f"\n🖱️ Velocidade Mouse: {int(vel)} px/s")
             elif tecla in (ord('.'), ord('>')):
-                vel, _ = config.ajustar_mouse(delta_vel=+50)
-                mapeador.aplicar_configuracao(config)
-                telemetria.registrar_evento(f"Velocidade mouse: {int(vel)} px/s", categoria="CONFIG")
-                print(f"\n🖱️ Velocidade Mouse: {int(vel)} px/s")
+                if mapeador.modo_mouse == "relativo":
+                    _, _, sens = config.ajustar_mouse(delta_sens=+100)
+                    mapeador.aplicar_configuracao(config)
+                    telemetria.registrar_evento(f"Sensibilidade mouse: {int(sens)}", categoria="CONFIG")
+                    print(f"\n🖱️ Sensibilidade Mouse: {int(sens)}")
+                else:
+                    vel, _, _ = config.ajustar_mouse(delta_vel=+50)
+                    mapeador.aplicar_configuracao(config)
+                    telemetria.registrar_evento(f"Velocidade mouse: {int(vel)} px/s", categoria="CONFIG")
+                    print(f"\n🖱️ Velocidade Mouse: {int(vel)} px/s")
             elif tecla in (ord('z'), ord('Z')):
-                delta = 0.03 if config.dados['mouse']['zona_morta'] < 0.25 else -0.15
-                _, zm = config.ajustar_mouse(delta_zm=delta)
+                delta = 0.03 if config.dados.get('mouse', {}).get('zona_morta', 0.20) < 0.25 else -0.15
+                _, zm, _ = config.ajustar_mouse(delta_zm=delta)
                 mapeador.aplicar_configuracao(config)
                 telemetria.registrar_evento(f"Zona morta: {int(zm*100)}%", categoria="CONFIG")
                 print(f"\n🎯 Zona morta mouse: {int(zm*100)}%")

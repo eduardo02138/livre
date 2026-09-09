@@ -24,11 +24,11 @@ DEDOS = {
 
 # Limiares anatomicos individualizados calibrados com base na telemetria
 LIMIARES_INDIVIDUAIS = {
-    "indicador": (0.48, 0.28),  # Excelente isolamento motor -> W
-    "medio":     (0.50, 0.30),  # Excelente isolamento motor -> S
-    "polegar":   (0.65, 0.45),  # margem contra clique falso em repouso
-    "mindinho":  (0.55, 0.35),  # Leve arrasto com anelar -> Clique Direito
-    "anelar":    (0.62, 0.42),  # Tendao acoplado ao medio -> E
+    "indicador": (0.68, 0.42),  # W (ou ação remapeada)
+    "medio":     (0.68, 0.42),  # S
+    "polegar":   (0.68, 0.45),  # Clique Esquerdo
+    "mindinho":  (0.70, 0.45),  # Clique Direito
+    "anelar":    (0.72, 0.48),  # E
 }
 
 # Perfil 1: Mapeamento Direto
@@ -159,6 +159,7 @@ class Mapeador:
         vel_max=900.0,
         perfil_padrao="DIRETO",
         aspecto=640.0 / 480.0,
+        modo_mouse="relativo",
     ):
         self.centro = centro
         # Os marcos chegam normalizados por LARGURA e ALTURA separadamente.
@@ -169,6 +170,11 @@ class Mapeador:
         self.zona_morta = zona_morta
         self.expo = expo
         self.vel_max = vel_max
+        self.modo_mouse = modo_mouse
+        self.sensibilidade_mouse = 1800.0
+        self.limiar_ruido_relativo = 0.0025  # ~1.6px em 640x480: elimina tremor de repouso
+        self._palma_ant = None
+        self._t_palma_ant = None
         self._fx = OneEuro()
         self._fy = OneEuro()
         self.perfil_nome = perfil_padrao
@@ -191,12 +197,12 @@ class Mapeador:
 
     @property
     def aciona(self):
-        # Valor de referencia para o indicador
-        return LIMIARES_INDIVIDUAIS["indicador"][0] + self.offset_sensibilidade
+        # Valor real do limiar ativo para o indicador
+        return self._hist["indicador"].aciona
 
     @property
     def libera(self):
-        return LIMIARES_INDIVIDUAIS["indicador"][1] + self.offset_sensibilidade
+        return self._hist["indicador"].libera
 
     def ajustar_sensibilidade(self, delta):
         """Ajusta todos os limiares mantendo as proporcoes anatomicas."""
@@ -215,9 +221,11 @@ class Mapeador:
             self.acoes[nome] = (d["tipo"], d["alvo"])
 
         m = config.dados.get("mouse", {})
-        self.vel_max = m.get("vel_max", self.vel_max)
-        self.zona_morta = m.get("zona_morta", self.zona_morta)
-        self.expo = m.get("expo", self.expo)
+        self.modo_mouse = m.get("modo", self.modo_mouse)
+        self.sensibilidade_mouse = float(m.get("sensibilidade", self.sensibilidade_mouse))
+        self.vel_max = float(m.get("vel_max", self.vel_max))
+        self.zona_morta = float(m.get("zona_morta", self.zona_morta))
+        self.expo = float(m.get("expo", self.expo))
 
     def trocar_perfil(self):
         if self.perfil_nome == "DIRETO":
@@ -230,10 +238,14 @@ class Mapeador:
 
     def recentrar(self, marcos):
         self.centro = centro_palma(marcos)
+        self._palma_ant = None
+        self._t_palma_ant = None
 
     def reset(self):
         """Limpa histórico de marcos e solta todos os estados internos."""
         self._marcos_suaves = None
+        self._palma_ant = None
+        self._t_palma_ant = None
         eventos = []
         for nome, estava in self._estado_anterior_dobrado.items():
             if estava:
@@ -297,6 +309,12 @@ class Mapeador:
             if f_med > 0.50 and est.flexoes.get("anelar", 0.0) < (f_med + 0.12):
                 dobrado["anelar"] = False
 
+            # Desacoplamento do mindinho: quando o médio ou anelar dobram,
+            # o tendão do mindinho sofre arraste mecânico. Inibimos clique direito acidental.
+            f_ane = est.flexoes.get("anelar", 0.0)
+            if (f_med > 0.50 or f_ane > 0.50) and est.flexoes.get("mindinho", 0.0) < 0.80:
+                dobrado["mindinho"] = False
+
         # Dispara eventos de telemetria para mudanças de estado
         for nome, ligado in dobrado.items():
             if dobrado[nome] and not self._estado_anterior_dobrado[nome]:
@@ -329,6 +347,35 @@ class Mapeador:
         est.dx = dx
         est.dy = dy
 
+        # Cálculo de velocidade do mouse (Modo Relativo vs Modo Joystick)
+        if self.modo_mouse == "relativo":
+            if self._palma_ant is None or self._t_palma_ant is None:
+                self._palma_ant = (cx, cy)
+                self._t_palma_ant = t
+                vx, vy = 0.0, 0.0
+            else:
+                dt_palma = max(1e-4, t - self._t_palma_ant)
+                delta_x = cx - self._palma_ant[0]
+                delta_y = cy - self._palma_ant[1]
+                dist = math.hypot(delta_x, delta_y)
+
+                if dist < self.limiar_ruido_relativo:
+                    # Mão parada: elimina rigorosamente qualquer deriva e ruído de sensor
+                    vx, vy = 0.0, 0.0
+                else:
+                    # Movimento dinâmico proporcional com aceleração balística suave
+                    ganho = (dist / 0.01) ** 0.15 if dist > 0.01 else 1.0
+                    vx = (delta_x / dt_palma) * self.sensibilidade_mouse * ganho
+                    vy = (delta_y / dt_palma) * self.sensibilidade_mouse * ganho
+                    vx = max(-self.vel_max, min(self.vel_max, vx))
+                    vy = max(-self.vel_max, min(self.vel_max, vy))
+
+                self._palma_ant = (cx, cy)
+                self._t_palma_ant = t
+        else:
+            vx = velocidade(dx, self.zona_morta, self.expo, self.vel_max)
+            vy = velocidade(dy, self.zona_morta, self.expo, self.vel_max)
+
         if self.perfil_nome == "HIBRIDO":
             est.modo_movimento = dobrado.get("medio", False)
             if est.modo_movimento:
@@ -341,11 +388,11 @@ class Mapeador:
                 if dx > self.zona_morta:
                     est.teclas.add("D")
             else:
-                est.vel_x = velocidade(dx, self.zona_morta, self.expo, self.vel_max)
-                est.vel_y = velocidade(dy, self.zona_morta, self.expo, self.vel_max)
+                est.vel_x = vx
+                est.vel_y = vy
         else:
-            est.vel_x = velocidade(dx, self.zona_morta, self.expo, self.vel_max)
-            est.vel_y = velocidade(dy, self.zona_morta, self.expo, self.vel_max)
+            est.vel_x = vx
+            est.vel_y = vy
 
         self._estado_anterior_teclas = est.teclas.copy()
         self._estado_anterior_botoes = est.botoes.copy()

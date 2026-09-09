@@ -6,9 +6,18 @@ por isso o jogo nao precisa saber de nada e o Wayland deixa de ser
 obstaculo — uinput opera abaixo do compositor.
 """
 
+import atexit
+import signal
+import threading
 import time
 
 from evdev import UInput, ecodes as e
+
+# Se 'aplicar' parar de ser chamado por mais tempo que isto, o cao de guarda
+# solta tudo. Uma tecla presa no kernel continua presa mesmo com o processo
+# travado — e quem perde o controle do teclado e o usuario, nao o programa.
+# Folgado o bastante para nao disparar num engasgo de meio segundo do laco.
+TEMPO_LIMITE_S = 1.5
 
 TECLAS = {
     "W": e.KEY_W, "A": e.KEY_A, "S": e.KEY_S, "D": e.KEY_D,
@@ -27,7 +36,21 @@ class SemPermissao(Exception):
 
 
 class Saida:
-    def __init__(self, nome="mao-virtual", espera=1.2):
+    """Mouse e teclado virtuais, com tres redes de seguranca.
+
+    O risco real deste modulo nao e errar um evento: e deixar uma tecla
+    AFUNDADA no kernel. Se o processo morre, trava ou o jogo cai com W
+    pressionado, o kernel nao sabe disso — a tecla continua pressionada para
+    o sistema inteiro e o usuario perde o controle do teclado.
+
+    Por isso tres camadas independentes soltam tudo:
+      1. sinais (SIGINT/SIGTERM/SIGHUP), para encerramento pedido de fora
+      2. atexit, que cobre excecao nao tratada e saida normal
+      3. cao de guarda, que cobre o pior caso — o laco principal travar sem
+         morrer, situacao em que 1 e 2 nunca disparam
+    """
+
+    def __init__(self, nome="mao-virtual", espera=1.2, tempo_limite=TEMPO_LIMITE_S):
         try:
             self._ui = UInput(CAPS, name=nome, version=1)
         except PermissionError as ex:
@@ -44,8 +67,73 @@ class Saida:
         self._resto_x = 0.0
         self._resto_y = 0.0
 
+        self._lock = threading.RLock()
+        self._fechado = False
+        self.tempo_limite = tempo_limite
+        self._ultimo_aplicar = time.monotonic()
+
+        atexit.register(self._emergencia)
+        self._sinais_anteriores = {}
+        self._instalar_sinais()
+
+        self._cao = threading.Thread(target=self._vigiar, name="solta-teclas",
+                                     daemon=True)
+        self._cao.start()
+
+    # ------------------------------------------------------- redes de seguranca
+
+    def _instalar_sinais(self):
+        """Solta as teclas antes de morrer — encadeando ao handler anterior."""
+        if threading.current_thread() is not threading.main_thread():
+            return                      # so a thread principal pode registrar
+        for s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            try:
+                anterior = signal.getsignal(s)
+                self._sinais_anteriores[s] = anterior
+                signal.signal(s, self._fazer_manipulador(s, anterior))
+            except (ValueError, OSError, AttributeError):
+                pass                    # plataforma sem esse sinal: segue
+
+    def _fazer_manipulador(self, sinal, anterior):
+        def manipulador(num, quadro):
+            self._emergencia()
+            # Encadeia: nao engolir o Ctrl+C nem o encerramento do sistema.
+            if callable(anterior) and anterior not in (signal.SIG_IGN, signal.SIG_DFL):
+                anterior(num, quadro)
+            elif anterior == signal.SIG_DFL:
+                signal.signal(sinal, signal.SIG_DFL)
+                signal.raise_signal(num)
+        return manipulador
+
+    def _vigiar(self):
+        """Se 'aplicar' parou de chegar e ha tecla presa, solta."""
+        while not self._fechado:
+            time.sleep(0.25)
+            try:
+                with self._lock:
+                    if (self._ligados
+                            and time.monotonic() - self._ultimo_aplicar > self.tempo_limite):
+                        self.soltar_tudo()
+            except Exception:
+                return                  # dispositivo ja fechado: nada a fazer
+
+    def _emergencia(self):
+        try:
+            with self._lock:
+                if not self._fechado:
+                    self.soltar_tudo()
+        except Exception:
+            pass                        # ultimo recurso: nunca propagar daqui
+
     def aplicar(self, estado, dt):
         """Integra a velocidade em pixels e emite so o que mudou."""
+        with self._lock:
+            self._ultimo_aplicar = time.monotonic()
+            if self._fechado:
+                return
+            self._aplicar_sem_lock(estado, dt)
+
+    def _aplicar_sem_lock(self, estado, dt):
         if abs(estado.vel_x) < 1e-3:
             self._resto_x = 0.0
         else:
@@ -87,15 +175,34 @@ class Saida:
         self._ligados = alvo
 
     def soltar_tudo(self):
-        for cod in self._ligados:
-            self._ui.write(e.EV_KEY, cod, 0)
-        if self._ligados:
-            self._ui.syn()
-        self._ligados = set()
+        with self._lock:
+            if self._fechado:
+                return
+            for cod in self._ligados:
+                self._ui.write(e.EV_KEY, cod, 0)
+            if self._ligados:
+                self._ui.syn()
+            self._ligados = set()
+            self._resto_x = self._resto_y = 0.0
 
     def fechar(self):
-        self.soltar_tudo()
-        self._ui.close()
+        with self._lock:
+            if self._fechado:
+                return
+            self.soltar_tudo()
+            self._fechado = True
+            self._ui.close()
+
+        for s, anterior in self._sinais_anteriores.items():
+            try:
+                signal.signal(s, anterior)
+            except (ValueError, OSError):
+                pass
+        self._sinais_anteriores.clear()
+        try:
+            atexit.unregister(self._emergencia)
+        except Exception:
+            pass
 
     def __enter__(self):
         return self
