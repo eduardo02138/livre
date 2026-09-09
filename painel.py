@@ -62,6 +62,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Painel HUD & Central de Configuração")
     parser.add_argument("--simulado", "-s", action="store_true", help="Usa gerador sintético em vez da webcam")
     parser.add_argument("--jogar", "-j", action="store_true", help="Ativa uinput imediatamente para controlar o jogo")
+    parser.add_argument("--gravar-video", "--gravar", "-g", action="store_true", default=False,
+                        help="Grava vídeo duplo (limpo + anotado) na pasta telemetria/")
     parser.add_argument("--camera", "-c", type=int, default=0, help="Índice da câmera (padrão: 0)")
     parser.add_argument("--largura", type=int, default=640, help="Largura do frame (padrão: 640)")
     parser.add_argument("--altura", type=int, default=480, help="Altura do frame (padrão: 480)")
@@ -95,10 +97,16 @@ class HUD:
             else:
                 cv2.circle(tela, pt, 4, (40, 180, 240), -1, cv2.LINE_AA)
 
-    def desenhar_vetor_mira(self, tela, centro_repouso, pos_palma, vel_x, vel_y, modo_movimento, zona_morta=0.15, modo_mouse="relativo"):
+    def desenhar_vetor_mira(self, tela, centro_repouso, pos_palma, vel_x, vel_y, modo_movimento, zona_morta=0.15, modo_mouse="relativo", punho_fechado=False):
         px = int(pos_palma[0] * self.w)
         py = int(pos_palma[1] * self.h)
         mag = math.hypot(vel_x, vel_y)
+
+        if punho_fechado:
+            cv2.circle(tela, (px, py), 7, (0, 215, 255), -1, cv2.LINE_AA)
+            cv2.putText(tela, "✊ CLUTCH (EMBREAGEM)", (px + 12, py + 4),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.40, (0, 215, 255), 1, cv2.LINE_AA)
+            return
 
         if modo_mouse == "joystick":
             cx_rep = int(centro_repouso[0] * self.w)
@@ -175,6 +183,33 @@ class HUD:
             cv2.putText(tela, "RASTREIO ATIVO", (self.w - 168, 29),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 255, 120), 1, cv2.LINE_AA)
 
+    def desenhar_alerta_borda(self, tela, pos_palma):
+        """Exibe indicador visual quando a mão está próxima dos limites do sensor."""
+        if pos_palma is None:
+            return
+        cx, cy = pos_palma
+        margem = 0.10
+        perto_esq = cx < margem
+        perto_dir = cx > (1.0 - margem)
+        perto_cima = cy < margem
+        perto_baixo = cy > (1.0 - margem)
+
+        if perto_esq or perto_dir or perto_cima or perto_baixo:
+            cor_alerta = (0, 140, 255)  # Laranja de advertência
+            if perto_esq:
+                cv2.line(tela, (2, 0), (2, self.h), cor_alerta, 4)
+            if perto_dir:
+                cv2.line(tela, (self.w - 3, 0), (self.w - 3, self.h), cor_alerta, 4)
+            if perto_cima:
+                cv2.line(tela, (0, 2), (self.w, 2), cor_alerta, 4)
+            if perto_baixo:
+                cv2.line(tela, (0, self.h - 3), (self.w, self.h - 3), cor_alerta, 4)
+
+            cv2.rectangle(tela, (self.w // 2 - 130, 44), (self.w // 2 + 130, 68), (20, 20, 30), -1)
+            cv2.rectangle(tela, (self.w // 2 - 130, 44), (self.w // 2 + 130, 68), cor_alerta, 1)
+            cv2.putText(tela, "⚠️ APROXIMANDO DA BORDA", (self.w // 2 - 110, 61),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.40, cor_alerta, 1, cv2.LINE_AA)
+
     def desenhar_barras_calibracao(self, tela, flexoes, config, dedo_selecionado):
         """Desenha as barras de flexão com destaque do dedo selecionado e controles."""
         x_base = 20
@@ -234,7 +269,7 @@ class HUD:
             cv2.putText(tela, txt_acao, (bx, y_base + altura_barra + 26),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.35, cor_acao, 1)
 
-    def desenhar_painel_teclas(self, tela, teclas_ativas, botoes_ativos, modo_uinput, perfil_nome):
+    def desenhar_painel_teclas(self, tela, teclas_ativas, botoes_ativos, modo_uinput, perfil_nome, punho_fechado=False):
         painel_x = self.w - 280
         painel_y = 15
 
@@ -249,6 +284,17 @@ class HUD:
         tw, th = 38, 38
         ini_x = painel_x + 8
         ini_y = painel_y + 40
+        b_y = ini_y + th + 8
+        bw, bh = 126, 26
+
+        if punho_fechado:
+            cv2.rectangle(tela, (painel_x, ini_y), (painel_x + 265, b_y + bh), (30, 25, 15), -1)
+            cv2.rectangle(tela, (painel_x, ini_y), (painel_x + 265, b_y + bh), (0, 215, 255), 2)
+            cv2.putText(tela, "PUNHO FECHADO", (painel_x + 35, ini_y + 26),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.52, (0, 255, 255), 2, cv2.LINE_AA)
+            cv2.putText(tela, "ACOES SUSPENSAS (REPOUSO)", (painel_x + 18, ini_y + 54),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 215, 255), 1, cv2.LINE_AA)
+            return
 
         for i, t in enumerate(teclas):
             tx = ini_x + i * (tw + 6)
@@ -383,7 +429,7 @@ def main():
     mapeador = Mapeador()
     mapeador.aplicar_configuracao(config)
 
-    telemetria = GravadorTelemetria(largura=largura, altura=altura, gravar_video=True)
+    telemetria = GravadorTelemetria(largura=largura, altura=altura, gravar_video=args.gravar_video)
 
     saida = None
     modo_uinput = args.jogar
@@ -397,7 +443,7 @@ def main():
             modo_uinput = False
 
     nome_janela = "Uma Mao no Ar — Painel & Central de Controle"
-    cv2.namedWindow(nome_janela, cv2.WINDOW_NORMAL)
+    cv2.namedWindow(nome_janela, cv2.WINDOW_NORMAL | cv2.WINDOW_GUI_NORMAL)
     cv2.resizeWindow(nome_janela, 960, int(960 * altura / largura))
 
     t_ant = time.time()
@@ -477,29 +523,36 @@ def main():
                         modo_movimento=estado.modo_movimento,
                         zona_morta=mapeador.zona_morta,
                         modo_mouse=mapeador.modo_mouse,
+                        punho_fechado=estado.punho_fechado,
                     )
+                    hud.desenhar_alerta_borda(tela, estado.palma)
 
                 hud.desenhar_barras_calibracao(tela, estado.flexoes, config, dedo_selecionado)
-                hud.desenhar_painel_teclas(tela, estado.teclas, estado.botoes, modo_uinput, mapeador.perfil_nome)
+                hud.desenhar_painel_teclas(tela, estado.teclas, estado.botoes, modo_uinput, mapeador.perfil_nome, punho_fechado=estado.punho_fechado)
                 hud.desenhar_log_eventos(tela)
 
                 # Telemetria ao vivo no console
                 if t_agora - t_ultimo_log > 0.10:
                     t_ultimo_log = t_agora
-                    pol = int(estado.flexoes.get('polegar', 0) * 100)
-                    ind = int(estado.flexoes.get('indicador', 0) * 100)
-                    med = int(estado.flexoes.get('medio', 0) * 100)
-                    ane = int(estado.flexoes.get('anelar', 0) * 100)
-                    min_ = int(estado.flexoes.get('mindinho', 0) * 100)
+                    if estado.punho_fechado:
+                        sys.stdout.write(
+                            f"\r📊 FPS: {int(1.0/dt):2d} | ✊ PUNHO FECHADO [NEUTRO / REPOUSO - COMANDOS SUSPENSOS]                "
+                        )
+                    else:
+                        pol = int(estado.flexoes.get('polegar', 0) * 100)
+                        ind = int(estado.flexoes.get('indicador', 0) * 100)
+                        med = int(estado.flexoes.get('medio', 0) * 100)
+                        ane = int(estado.flexoes.get('anelar', 0) * 100)
+                        min_ = int(estado.flexoes.get('mindinho', 0) * 100)
 
-                    t_str = ",".join(sorted(estado.teclas)) if estado.teclas else "-"
-                    b_str = ",".join(sorted(estado.botoes)) if estado.botoes else "-"
-                    sys.stdout.write(
-                        f"\r📊 FPS: {int(1.0/dt):2d} | IND: {ind:2d}% ({'W' if 'W' in estado.teclas else ' '}) | "
-                        f"MED: {med:2d}% ({'S' if 'S' in estado.teclas else ' '}) | "
-                        f"POL: {pol:2d}% | MIN: {min_:2d}% | ANE: {ane:2d}% | "
-                        f"TECLAS: [{t_str}] | MOUSE: [{b_str}]   "
-                    )
+                        t_str = ",".join(sorted(estado.teclas)) if estado.teclas else "-"
+                        b_str = ",".join(sorted(estado.botoes)) if estado.botoes else "-"
+                        sys.stdout.write(
+                            f"\r📊 FPS: {int(1.0/dt):2d} | IND: {ind:2d}% ({'W' if 'W' in estado.teclas else ' '}) | "
+                            f"MED: {med:2d}% ({'S' if 'S' in estado.teclas else ' '}) | "
+                            f"POL: {pol:2d}% | MIN: {min_:2d}% | ANE: {ane:2d}% | "
+                            f"TECLAS: [{t_str}] | MOUSE: [{b_str}]   "
+                        )
                     sys.stdout.flush()
 
                 if modo_uinput and saida:
@@ -525,17 +578,19 @@ def main():
             if menu_aberto:
                 hud.desenhar_central_configuracao(tela, config, dedo_selecionado)
 
-            # FPS e indicador de gravação de vídeo duplo
+            # FPS e indicador de gravação
             fps = 1.0 / dt
             cv2.putText(tela, f"{int(fps)} FPS", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 2)
-            cv2.circle(tela, (115, 24), 5, (0, 0, 255), -1, cv2.LINE_AA)
-            cv2.putText(tela, "REC VIDEO DUPLO", (126, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 120, 255), 1, cv2.LINE_AA)
-            cv2.putText(tela, f"Gravando: telemetria/{telemetria.id_sessao} (CSV + 2x MP4)", (20, altura - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.35, (130, 160, 200), 1, cv2.LINE_AA)
-
-            # Gravação contínua das duas trilhas de vídeo (limpo + anotado)
-            frame_limpo = frame if camera else tela
-            telemetria.gravar_quadros_video(frame_limpo, tela)
+            if telemetria.gravar_video:
+                cv2.circle(tela, (115, 24), 5, (0, 0, 255), -1, cv2.LINE_AA)
+                cv2.putText(tela, "REC VIDEO DUPLO", (126, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 120, 255), 1, cv2.LINE_AA)
+                cv2.putText(tela, f"Gravando: telemetria/{telemetria.id_sessao} (CSV + 2x MP4)", (20, altura - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.35, (130, 160, 200), 1, cv2.LINE_AA)
+                frame_limpo = frame if camera else tela
+                telemetria.gravar_quadros_video(frame_limpo, tela)
+            else:
+                cv2.putText(tela, f"Telemetria: telemetria/{telemetria.id_sessao} (CSV + LOG)", (20, altura - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.35, (130, 160, 200), 1, cv2.LINE_AA)
 
             cv2.imshow(nome_janela, tela)
             tecla = cv2.waitKey(1) & 0xFF

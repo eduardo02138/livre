@@ -115,6 +115,8 @@ class RastreadorONNX:
         self._perdas_consecutivas = 0
         self._ultimo_resultado = None
 
+        self._w = 640
+        self._h = 480
         pasta_log = os.path.join(raiz, "logs")
         try:
             os.makedirs(pasta_log, exist_ok=True)
@@ -123,7 +125,7 @@ class RastreadorONNX:
                 f.write(f"\n--- sessao iniciada {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
         except OSError:
             self._arquivo_log = None
-        self._m = {"quadros": 0, "perdidos": 0, "redeteccoes": 0,
+        self._m = {"quadros": 0, "perdidos": 0, "sem_mao": 0, "perdeu_rastreio": 0, "redeteccoes": 0,
                    "ms": 0.0, "score": 0.0, "lado": 0.0, "t": time.time()}
 
     # ---------------------------------------------------------------- palma
@@ -234,7 +236,10 @@ class RastreadorONNX:
         """Devolve 21 pares (x, y) normalizados no quadro, ou None."""
         t_ini = time.perf_counter()
         h, w = quadro_bgr.shape[:2]
+        self._h, self._w = h, w
         self.detectou_palma = False
+
+        tinha_roi = self._roi is not None
 
         # Reaproveita a ROI do quadro anterior; so chama o detector se perdeu.
         if self._roi is None:
@@ -242,7 +247,7 @@ class RastreadorONNX:
             self.detectou_palma = self._roi is not None
             if self._roi is None:
                 self.score = 0.0
-                return self._registrar(None, t_ini)
+                return self._registrar(None, t_ini, motivo="sem_mao")
 
         pontos, score = self._marcos_do_roi(quadro_bgr, self._roi)
 
@@ -261,26 +266,25 @@ class RastreadorONNX:
                 self._roi = None
                 self._ultimo_resultado = None
                 self.score = score
-                return self._registrar(None, t_ini)
+                motivo = "perdeu_rastreio" if tinha_roi else "sem_mao"
+                return self._registrar(None, t_ini, motivo=motivo)
 
         self._perdas_consecutivas = 0
         self.score = score
         self._roi = self._roi_dos_marcos(pontos, max_lado=float(max(h, w) * 1.5))
         if self._roi is None:
             self._ultimo_resultado = None
-            return self._registrar(None, t_ini)
+            return self._registrar(None, t_ini, motivo="perdeu_rastreio")
         resultado = [(float(p[0]) / w, float(p[1]) / h) for p in pontos]
         self._ultimo_resultado = resultado
         return self._registrar(resultado, t_ini)
 
     # ------------------------------------------------------------- telemetria
 
-    def _registrar(self, resultado, t_ini):
+    def _registrar(self, resultado, t_ini, motivo=None):
         """Acumula metricas e grava um resumo em arquivo a cada segundo.
 
-        A telemetria do painel vai so para o console e some junto com ele.
-        Este log e o que permite diagnosticar depois: taxa de perda, custo
-        por quadro, estabilidade do tamanho da ROI.
+        Distingue claramente entre 'sem_mao' (ausente) e 'perdeu_rastreio' (falha real).
         """
         self._m["quadros"] += 1
         self._m["ms"] += (time.perf_counter() - t_ini) * 1000.0
@@ -288,6 +292,10 @@ class RastreadorONNX:
             self._m["redeteccoes"] += 1
         if resultado is None:
             self._m["perdidos"] += 1
+            if motivo == "sem_mao":
+                self._m["sem_mao"] += 1
+            else:
+                self._m["perdeu_rastreio"] += 1
         else:
             self._m["score"] += self.score
             if self._roi:
@@ -297,11 +305,14 @@ class RastreadorONNX:
         if agora - self._m["t"] >= 1.0 and self._arquivo_log:
             n = max(1, self._m["quadros"])
             ok = max(1, n - self._m["perdidos"])
+            pct_sem_mao = 100.0 * self._m["sem_mao"] / n
+            pct_perdeu = 100.0 * self._m["perdeu_rastreio"] / n
             linha = (
                 f"{time.strftime('%H:%M:%S')} "
                 f"fps={n / (agora - self._m['t']):5.1f} "
                 f"ms/quadro={self._m['ms'] / n:5.1f} "
-                f"perda={100.0 * self._m['perdidos'] / n:5.1f}% "
+                f"sem_mao={pct_sem_mao:5.1f}% "
+                f"perdeu_rastreio={pct_perdeu:5.1f}% "
                 f"redeteccoes={self._m['redeteccoes']:3d} "
                 f"score={self._m['score'] / ok:.3f} "
                 f"roi_lado={self._m['lado'] / ok:6.1f}px\n"
@@ -311,7 +322,7 @@ class RastreadorONNX:
                     f.write(linha)
             except OSError:
                 self._arquivo_log = None      # disco cheio ou sem permissao
-            self._m = {"quadros": 0, "perdidos": 0, "redeteccoes": 0,
+            self._m = {"quadros": 0, "perdidos": 0, "sem_mao": 0, "perdeu_rastreio": 0, "redeteccoes": 0,
                        "ms": 0.0, "score": 0.0, "lado": 0.0, "t": agora}
 
         return resultado
@@ -320,10 +331,7 @@ class RastreadorONNX:
         """Regenera a regiao de interesse a partir dos proprios marcos.
 
         Ancorada em DOIS pontos da palma — pulso (0) e base do medio (9).
-        Os dois sao ossos fixos: a distancia entre eles nao muda quando os
-        dedos dobram. Usar o centroide dos 21 pontos faria a caixa migrar
-        para a palma a cada flexao, que e exatamente o gesto de que este
-        sistema depende — a caixa escorregava para fora da mao sozinha.
+        Alarga a ROI quando a mão se aproxima do limite do quadro para não cortar dedos.
         """
         pulso = pontos[0, :2]
         medio = pontos[9, :2]
@@ -335,18 +343,22 @@ class RastreadorONNX:
         # Convencao MediaPipe/OpenCV: angulo que alinha o vetor verticalmente para cima
         ang = math.degrees(math.atan2(v[0], -(v[1])))
 
-        # A mao inteira se estende ~2.0L a partir do pulso; centra no meio
-        # dela (1.05 * v) e abre a caixa com margem ideal (2.9L)
+        # A mao inteira se estende ~2.0L a partir do pulso; centra no meio dela (1.05 * v)
         cx = float(pulso[0] + 1.05 * v[0])
         cy = float(pulso[1] + 1.05 * v[1])
-        # MIN_ROI_PIXELS filtra CANDIDATOS do detector de palma, que e onde
-        # sombra e dobra de roupa entram. Aplicar o mesmo corte aqui era
-        # errado: este ponto so e alcancado depois de o modelo de marcos ter
-        # CONFIRMADO a mao com score acima do limiar. Descartar por tamanho
-        # jogava fora rastreio bom de mao distante e criava um ciclo —
-        # confirma, descarta, redetecta, confirma — que dobrava o custo por
-        # quadro. Quem decide perda aqui e o score, nao o tamanho.
-        novo_lado = float(np.clip(L * 2.9, 40.0, max_lado))
+
+        # Alargamento adaptativo da ROI próximo à borda do quadro:
+        # Se a mão se aproximar dos limites do sensor, expande o fator de margem
+        # de 2.9L até 3.4L para evitar que a ponta dos dedos seja cortada da caixa
+        fator_margem = 2.9
+        if hasattr(self, "_w") and hasattr(self, "_h") and self._w and self._h:
+            dist_bx = min(cx, self._w - cx) / self._w
+            dist_by = min(cy, self._h - cy) / self._h
+            dist_borda = min(dist_bx, dist_by)
+            if dist_borda < 0.20:
+                fator_margem += 0.5 * max(0.0, (0.20 - dist_borda) / 0.20)
+
+        novo_lado = float(np.clip(L * fator_margem, 40.0, max_lado))
 
         # Suavização da caixa de rastreio:
         # Não suavizamos o centro (cx, cy) para eliminar completamente o atraso (lag)

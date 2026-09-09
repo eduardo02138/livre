@@ -26,11 +26,11 @@ ACOES_DISPONIVEIS = [
 
 CONFIG_PADRAO = {
     "dedos": {
-        "polegar":   {"tipo": "botao", "alvo": "ESQUERDO", "aciona": 0.68, "libera": 0.45},
-        "indicador": {"tipo": "tecla", "alvo": "W",        "aciona": 0.68, "libera": 0.42},
-        "medio":     {"tipo": "tecla", "alvo": "S",        "aciona": 0.68, "libera": 0.42},
-        "anelar":    {"tipo": "tecla", "alvo": "E",        "aciona": 0.72, "libera": 0.48},
-        "mindinho":  {"tipo": "botao", "alvo": "DIREITO",  "aciona": 0.70, "libera": 0.45},
+        "polegar":   {"tipo": "botao", "alvo": "ESQUERDO", "aciona": 0.62, "libera": 0.38},
+        "indicador": {"tipo": "tecla", "alvo": "W",        "aciona": 0.62, "libera": 0.36},
+        "medio":     {"tipo": "tecla", "alvo": "S",        "aciona": 0.62, "libera": 0.36},
+        "anelar":    {"tipo": "tecla", "alvo": "E",        "aciona": 0.65, "libera": 0.38},
+        "mindinho":  {"tipo": "botao", "alvo": "DIREITO",  "aciona": 0.58, "libera": 0.34},
     },
     "mouse": {
         "modo": "relativo",

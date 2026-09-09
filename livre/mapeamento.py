@@ -24,11 +24,11 @@ DEDOS = {
 
 # Limiares anatomicos individualizados calibrados com base na telemetria
 LIMIARES_INDIVIDUAIS = {
-    "indicador": (0.68, 0.42),  # W (ou ação remapeada)
-    "medio":     (0.68, 0.42),  # S
-    "polegar":   (0.68, 0.45),  # Clique Esquerdo
-    "mindinho":  (0.70, 0.45),  # Clique Direito
-    "anelar":    (0.72, 0.48),  # E
+    "indicador": (0.62, 0.36),  # W (ou ação remapeada)
+    "medio":     (0.62, 0.36),  # S
+    "polegar":   (0.62, 0.38),  # Clique Esquerdo
+    "mindinho":  (0.58, 0.34),  # Clique Direito (sensibilidade calibrada)
+    "anelar":    (0.65, 0.38),  # E
 }
 
 # Perfil 1: Mapeamento Direto
@@ -51,6 +51,10 @@ PERFIL_HIBRIDO = {
 
 
 ASPECTO_PADRAO = 640.0 / 480.0
+
+# Janela da mediana movel sobre a flexao. Em 5 quadros (~170 ms a 30 fps),
+# um pico de ate 2 quadros e descartado sem afetar o valor de repouso.
+TAMANHO_MEDIANA = 5
 
 
 def _desfazer_aspecto(p, aspecto=ASPECTO_PADRAO):
@@ -148,6 +152,7 @@ class Estado:
     dy: float = 0.0
     perfil: str = "DIRETO"
     eventos_novos: list = field(default_factory=list)
+    punho_fechado: bool = False
 
 
 class Mapeador:
@@ -194,6 +199,28 @@ class Mapeador:
         self._estado_anterior_botoes = set()
         self._estado_anterior_dobrado = {nome: False for nome in DEDOS}
         self._marcos_suaves = None
+        self._janela_mediana = {}
+        self._punho_fechado = False
+        self._cont_libera_punho = 0
+
+    def _mediana(self, nome, valor):
+        """Mediana movel sobre a flexao, para matar pico de 1-2 quadros.
+
+        A telemetria mostra flexao com media de 10-15% e picos de 100% nos
+        cinco dedos, e 75% dos acionamentos durando 3 quadros ou menos —
+        forma de ruido impulsivo, nao de dedo dobrando. Subir o limiar nao
+        resolve porque o pico vai a 100% e atravessa qualquer valor.
+
+        Mediana e o filtro certo para impulso: um pico isolado numa janela
+        de 5 simplesmente nao e o elemento do meio, entao desaparece sem
+        deixar residuo. Uma media, no lugar dela, espalharia o pico pelos
+        quadros vizinhos em vez de remove-lo.
+        """
+        janela = self._janela_mediana.setdefault(nome, [])
+        janela.append(valor)
+        if len(janela) > TAMANHO_MEDIANA:
+            janela.pop(0)
+        return sorted(janela)[len(janela) // 2]
 
     @property
     def aciona(self):
@@ -246,6 +273,8 @@ class Mapeador:
         self._marcos_suaves = None
         self._palma_ant = None
         self._t_palma_ant = None
+        self._punho_fechado = False
+        self._cont_libera_punho = 0
         eventos = []
         for nome, estava in self._estado_anterior_dobrado.items():
             if estava:
@@ -287,33 +316,96 @@ class Mapeador:
             else:
                 f = flexao_dedo(marcos_geo, idx)
 
+            f = self._mediana(nome, f)
             est.flexoes[nome] = f
             dobrado[nome] = False if na_borda else self._hist[nome](f)
 
         # -------------------------------------------------------------
-        # REGRA BIOMECÂNICA DE EXCLUSIVIDADE MÚTUA W vs S
+        # DETECÇÃO BIOMECÂNICA DE PUNHO FECHADO (GESTO NEUTRO / CLUTCH)
         # -------------------------------------------------------------
-        # Se tanto o indicador (W) quanto o médio (S) atingirem o limiar,
-        # o que estiver mais dobrado assume 100% da intenção.
-        if self.perfil_nome == "DIRETO":
-            f_ind = est.flexoes.get("indicador", 0.0)
-            f_med = est.flexoes.get("medio", 0.0)
-            if dobrado["indicador"] and dobrado["medio"]:
-                if f_ind >= f_med:
-                    dobrado["medio"] = False
-                else:
-                    dobrado["indicador"] = False
+        # Ao fechar a mão em punho, múltiplos dedos longos se curvam juntos.
+        # Isso NÃO representa intenção de comandos simultâneos (ex: W + S + E + Botões).
+        dedos_longos = ("indicador", "medio", "anelar", "mindinho")
+        longos_flex = [est.flexoes.get(d, 0.0) for d in dedos_longos]
+        media_longos = sum(longos_flex) / 4.0
+        qtd_longos_flex = sum(1 for f in longos_flex if f >= 0.55)
 
-            # Desacoplamento do anelar: quando o médio se dobra muito,
-            # o tendão do anelar sobe por inércia física. Suprimimos essa falsa ativação.
-            if f_med > 0.50 and est.flexoes.get("anelar", 0.0) < (f_med + 0.12):
-                dobrado["anelar"] = False
+        # Critério de ativação do punho fechado:
+        # 1. Média dos dedos longos >= 62% E pelo menos 3 dedos longos dobrados (>= 55%)
+        # 2. OU conflito biomecânico simultâneo W + S + Anelar
+        candidato_punho = (media_longos >= 0.62 and qtd_longos_flex >= 3) or (
+            est.flexoes.get("indicador", 0.0) >= 0.65
+            and est.flexoes.get("medio", 0.0) >= 0.65
+            and est.flexoes.get("anelar", 0.0) >= 0.55
+        )
 
-            # Desacoplamento do mindinho: quando o médio ou anelar dobram,
-            # o tendão do mindinho sofre arraste mecânico. Inibimos clique direito acidental.
-            f_ane = est.flexoes.get("anelar", 0.0)
-            if (f_med > 0.50 or f_ane > 0.50) and est.flexoes.get("mindinho", 0.0) < 0.80:
-                dobrado["mindinho"] = False
+        if not self._punho_fechado:
+            if candidato_punho:
+                self._punho_fechado = True
+                self._cont_libera_punho = 0
+                est.eventos_novos.append("PUNHO [FECHADO] -> ACOES SUSPENSAS (NEUTRO)")
+        else:
+            # Histerese de saída com debounce de 3 quadros (~100ms)
+            # Evita que oclusões momentâneas do MediaPipe soltem o estado de punho por 1 quadro
+            if media_longos < 0.42 or qtd_longos_flex < 2:
+                self._cont_libera_punho += 1
+                if self._cont_libera_punho >= 3:
+                    self._punho_fechado = False
+                    self._cont_libera_punho = 0
+                    est.eventos_novos.append("PUNHO [ABERTO] -> CONTROLE ATIVO")
+            else:
+                self._cont_libera_punho = 0
+
+        est.punho_fechado = self._punho_fechado
+
+        if self._punho_fechado:
+            # Supressão total de comandos: punho fechado é neutro / descanso
+            for nome in DEDOS:
+                dobrado[nome] = False
+        else:
+            # -------------------------------------------------------------
+            # REGRA BIOMECÂNICA DE EXCLUSIVIDADE MÚTUA W vs S
+            # -------------------------------------------------------------
+            # Se tanto o indicador (W) quanto o médio (S) atingirem o limiar,
+            # o que estiver mais dobrado assume 100% da intenção, com histerese
+            # de transição para evitar oscilações a cada quadro.
+            if self.perfil_nome == "DIRETO":
+                f_ind = est.flexoes.get("indicador", 0.0)
+                f_med = est.flexoes.get("medio", 0.0)
+                if dobrado["indicador"] and dobrado["medio"]:
+                    ind_estava = self._estado_anterior_dobrado.get("indicador", False)
+                    med_estava = self._estado_anterior_dobrado.get("medio", False)
+                    if ind_estava and not med_estava:
+                        if f_med > (f_ind + 0.08):
+                            dobrado["indicador"] = False
+                        else:
+                            dobrado["medio"] = False
+                    elif med_estava and not ind_estava:
+                        if f_ind > (f_med + 0.08):
+                            dobrado["medio"] = False
+                        else:
+                            dobrado["indicador"] = False
+                    else:
+                        if f_ind >= f_med:
+                            dobrado["medio"] = False
+                        else:
+                            dobrado["indicador"] = False
+
+                # Desacoplamento do anelar: quando o médio se dobra muito,
+                # o tendão do anelar sobe por inércia física. Suprimimos essa falsa ativação.
+                if f_med > 0.50 and est.flexoes.get("anelar", 0.0) < (f_med + 0.12):
+                    dobrado["anelar"] = False
+
+                # Desacoplamento inteligente do mindinho:
+                # O mindinho só é suprimido se for arraste passivo do médio ou do anelar
+                # (quando o dedo motor principal estiver consideravelmente mais flexionado que o mindinho).
+                # Se o mindinho for acionado deliberadamente, ele NÃO é bloqueado.
+                f_ane = est.flexoes.get("anelar", 0.0)
+                f_min = est.flexoes.get("mindinho", 0.0)
+                if f_med > 0.50 and f_min < (f_med - 0.10):
+                    dobrado["mindinho"] = False
+                elif f_ane > 0.50 and f_min < (f_ane - 0.08):
+                    dobrado["mindinho"] = False
 
         # Dispara eventos de telemetria para mudanças de estado
         for nome, ligado in dobrado.items():
@@ -348,7 +440,12 @@ class Mapeador:
         est.dy = dy
 
         # Cálculo de velocidade do mouse (Modo Relativo vs Modo Joystick)
-        if self.modo_mouse == "relativo":
+        if self._punho_fechado:
+            # Embreagem de reposicionamento (Clutch): cursor parado sem solavancos
+            vx, vy = 0.0, 0.0
+            self._palma_ant = (cx, cy)
+            self._t_palma_ant = t
+        elif self.modo_mouse == "relativo":
             if self._palma_ant is None or self._t_palma_ant is None:
                 self._palma_ant = (cx, cy)
                 self._t_palma_ant = t

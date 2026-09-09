@@ -186,6 +186,55 @@ def verificar_diagonal():
     return [] if ok else [f"diagonal: esperava W e A juntos, veio {sorted(est.teclas)}"]
 
 
+def verificar_punho_fechado():
+    """Valida detecção de punho fechado (supressão total de comandos e embreagem de mouse)."""
+    mao = MaoSintetica()
+    mapeador = Mapeador(perfil_padrao="DIRETO", modo_mouse="relativo")
+    mapeador.recentrar(mao.marcos())
+    problemas = []
+    print("\n  punho fechado (supressao total e embreagem de mouse)")
+
+    # 1. Mao em punho: todos os dedos curvados fortemente
+    mao.curvas = {n: CURVA_FORTE for n in mao.curvas}
+    mao.deslocamento = (0.20, 0.20)
+    est = None
+    for i in range(5):
+        est = mapeador(mao.marcos(), i / HZ)
+
+    ok_punho = est.punho_fechado
+    ok_sem_teclas = (len(est.teclas) == 0)
+    ok_sem_botoes = (len(est.botoes) == 0)
+    ok_clutch = (est.vel_x == 0.0 and est.vel_y == 0.0)
+
+    print(f"    {'ok  ' if ok_punho else 'FALHA'} punho detectado (punho_fechado={est.punho_fechado})")
+    print(f"    {'ok  ' if ok_sem_teclas else 'FALHA'} teclas suprimidas: {sorted(est.teclas) or '-'}")
+    print(f"    {'ok  ' if ok_sem_botoes else 'FALHA'} botoes suprimidos: {sorted(est.botoes) or '-'}")
+    print(f"    {'ok  ' if ok_clutch else 'FALHA'} embreagem de mouse (clutch vel=0): ({est.vel_x:.1f}, {est.vel_y:.1f})")
+
+    if not (ok_punho and ok_sem_teclas and ok_sem_botoes and ok_clutch):
+        problemas.append(f"punho_fechado: esperado neutro sem acoes, veio teclas={est.teclas} botoes={est.botoes}")
+
+    # 2. Reabertura da mao: volta a responder normalmente
+    mao.curvas = {n: 0.0 for n in mao.curvas}
+    for i in range(5, 12):
+        est = mapeador(mao.marcos(), i / HZ)
+    ok_aberto = (not est.punho_fechado)
+    print(f"    {'ok  ' if ok_aberto else 'FALHA'} reabertura detectada (punho_fechado={est.punho_fechado})")
+    if not ok_aberto:
+        problemas.append("punho_fechado: mao reaberta permaneceu travada em punho")
+
+    # 3. Combo deliberado: Andar + Mirar (Indicador + Mindinho) NÃO deve ser considerado punho
+    mao.curvas = {n: (CURVA_FORTE if n in ("indicador", "mindinho") else 0.0) for n in mao.curvas}
+    for i in range(12, 18):
+        est = mapeador(mao.marcos(), i / HZ)
+    ok_combo = (not est.punho_fechado and est.teclas == {"W"} and est.botoes == {"DIREITO"})
+    print(f"    {'ok  ' if ok_combo else 'FALHA'} combo W + Mindinho liberado (teclas={sorted(est.teclas)} botoes={sorted(est.botoes)})")
+    if not ok_combo:
+        problemas.append(f"punho_fechado: combo legitimo W+Mindinho bloqueado indevidamente (teclas={est.teclas} botoes={est.botoes})")
+
+    return problemas
+
+
 def enviar_de_verdade():
     """Repete a sequencia mandando eventos reais para o sistema."""
     from livre.saida import Saida, SemPermissao
@@ -228,6 +277,7 @@ def main():
     problemas += verificar_dedos("HIBRIDO", PERFIL_HIBRIDO)
     problemas += verificar_mira()
     problemas += verificar_diagonal()
+    problemas += verificar_punho_fechado()
 
     print()
     if problemas:

@@ -58,34 +58,44 @@ class OneEuro:
 
 
 class Histerese:
-    """Dois limiares com confirmação temporal: aciona com persistência e solta imediatamente.
+    """Dois limiares com confirmação temporal simétrica: elimina ruídos de 1 quadro.
 
-    Exige que o valor permaneça acima de 'aciona' por 'quadros_confirmacao' (padrão: 2)
-    para ativar, eliminando pulsos transitórios de 1 único quadro (30ms) causados
-    por ruído de sensor. A liberação continua imediata para máxima responsividade.
+    Exige persistência de 'quadros_confirmacao' (padrão: 2) para ativar e
+    'quadros_libera' (padrão: 2, ~66ms) para soltar. Isso impede que quedas
+    transitórias de 1 único quadro (30ms) causadas por oclusão de sensor quebrem
+    a caminhada contínua (ex: sprint no W) ou soltem cliques sustentados.
     """
 
-    def __init__(self, aciona, libera, quadros_confirmacao=2):
+    def __init__(self, aciona, libera, quadros_confirmacao=2, quadros_libera=2):
         if libera >= aciona:
             raise ValueError("'libera' precisa ser menor que 'aciona'")
         self.aciona = aciona
         self.libera = libera
         self.quadros_confirmacao = quadros_confirmacao
+        self.quadros_libera = quadros_libera
         self.ativo = False
-        self._contador = 0
+        self._contador_aciona = 0
+        self._contador_libera = 0
 
     def __call__(self, valor):
         if self.ativo:
             if valor < self.libera:
-                self.ativo = False
-                self._contador = 0
+                self._contador_libera += 1
+                if self._contador_libera >= self.quadros_libera:
+                    self.ativo = False
+                    self._contador_libera = 0
+                    self._contador_aciona = 0
+            else:
+                self._contador_libera = 0
         else:
             if valor >= self.aciona:
-                self._contador += 1
-                if self._contador >= self.quadros_confirmacao:
+                self._contador_aciona += 1
+                if self._contador_aciona >= self.quadros_confirmacao:
                     self.ativo = True
+                    self._contador_aciona = 0
+                    self._contador_libera = 0
             else:
-                self._contador = 0
+                self._contador_aciona = 0
         return self.ativo
 
 

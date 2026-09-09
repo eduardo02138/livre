@@ -13,7 +13,7 @@ from datetime import datetime
 
 
 class GravadorTelemetria:
-    def __init__(self, diretorio_base=None, taxa_hz=10.0, gravar_video=True, largura=640, altura=480, fps_video=30.0):
+    def __init__(self, diretorio_base=None, taxa_hz=10.0, gravar_video=False, largura=640, altura=480, fps_video=30.0, max_sessoes_video=3):
         if diretorio_base is None:
             raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             diretorio_base = os.path.join(raiz, "telemetria")
@@ -24,6 +24,7 @@ class GravadorTelemetria:
         self.taxa_hz = taxa_hz
         self.intervalo_gravacao = 1.0 / taxa_hz
         self._ultimo_registro_csv = 0.0
+        self.max_sessoes_video = max_sessoes_video
 
         # Identificador único da sessão
         self.id_sessao = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -55,6 +56,7 @@ class GravadorTelemetria:
                     print(f"🎬 Gravação de telemetria em vídeo duplo ativada:")
                     print(f"   • Câmera limpa:  {os.path.basename(self.caminho_video_limpo)}")
                     print(f"   • Tela anotada:  {os.path.basename(self.caminho_video_anotado)}")
+                    self.limpar_videos_antigos(self.max_sessoes_video)
             except Exception as e:
                 print(f"⚠️ Aviso ao inicializar vídeo duplo: {e}")
                 self.gravar_video = False
@@ -135,6 +137,27 @@ class GravadorTelemetria:
         if self._writer_anotado and tela_anotada is not None:
             self._writer_anotado.write(tela_anotada)
 
+    def limpar_videos_antigos(self, max_sessoes=3):
+        """Mantém apenas as últimas N sessões de vídeo na pasta telemetria para não encher o disco."""
+        try:
+            arquivos = os.listdir(self.pasta)
+            videos = [f for f in arquivos if f.endswith(".mp4")]
+            sessoes = sorted(list(set(
+                f.replace("video_limpo_", "").replace("video_anotado_", "").replace(".mp4", "")
+                for f in videos
+            )), reverse=True)
+            if len(sessoes) > max_sessoes:
+                remover = set(sessoes[max_sessoes:])
+                for f in videos:
+                    for s in remover:
+                        if s in f:
+                            try:
+                                os.remove(os.path.join(self.pasta, f))
+                            except OSError:
+                                pass
+        except Exception:
+            pass
+
     def fechar(self):
         """Gera o relatório resumo final da sessão e fecha os arquivos."""
         duracao = max(1.0, time.time() - self.t_inicio)
@@ -143,8 +166,6 @@ class GravadorTelemetria:
         fps_medio = self.total_quadros / duracao
         taxa_rastreio = (self.quadros_com_mao / max(1, self.total_quadros)) * 100.0
 
-        self.registrar_evento(f"Sessão encerrada. Duração: {minutos}m {segundos}s", categoria="SISTEMA")
-
         # Libera os gravadores de vídeo MP4
         if self._writer_limpo:
             self._writer_limpo.release()
@@ -152,6 +173,21 @@ class GravadorTelemetria:
         if self._writer_anotado:
             self._writer_anotado.release()
             self._writer_anotado = None
+
+        # Descarta arquivos vazios de sessões abortadas/efêmeras (< 10 segundos ou 0 quadros com mão)
+        if duracao < 10.0 or self.quadros_com_mao == 0:
+            self._f_log.close()
+            self._f_csv.close()
+            for caminho in (self.caminho_log, self.caminho_csv, self.caminho_video_limpo, self.caminho_video_anotado):
+                try:
+                    if os.path.exists(caminho):
+                        os.remove(caminho)
+                except OSError:
+                    pass
+            return
+
+        self.limpar_videos_antigos(self.max_sessoes_video)
+        self.registrar_evento(f"Sessão encerrada. Duração: {minutos}m {segundos}s", categoria="SISTEMA")
 
         # Escreve o relatório final
         with open(self.caminho_resumo, "w", encoding="utf-8") as f:
