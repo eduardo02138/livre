@@ -26,7 +26,7 @@ DEDOS = {
 LIMIARES_INDIVIDUAIS = {
     "indicador": (0.48, 0.28),  # Excelente isolamento motor -> W
     "medio":     (0.50, 0.30),  # Excelente isolamento motor -> S
-    "polegar":   (0.55, 0.35),  # Articulacao propria + oposicao -> Clique Esquerdo
+    "polegar":   (0.65, 0.45),  # margem contra clique falso em repouso
     "mindinho":  (0.55, 0.35),  # Leve arrasto com anelar -> Clique Direito
     "anelar":    (0.62, 0.42),  # Tendao acoplado ao medio -> E
 }

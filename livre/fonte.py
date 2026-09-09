@@ -55,14 +55,21 @@ class MaoSintetica:
                 continue
 
             if nome == "polegar":
-                # O polegar nao dobra como os outros: ele se OPOE, levando a
-                # ponta em direcao a base do indicador. Girar as falanges no
-                # plano mantinha a ponta longe dali, entao flexao_polegar —
-                # que mede exatamente essa distancia — lia 0.00 sempre e o
-                # clique esquerdo ficava sem cobertura de teste.
+                # O polegar faz duas coisas ao mesmo tempo, e flexao_polegar
+                # mede as duas: ele DOBRA nas proprias juntas e se OPOE,
+                # levando a ponta em direcao a base do indicador. Modelar so
+                # a oposicao deixava as falanges quase colineares e o mock
+                # empacava em 0.63, abaixo do que uma mao real alcanca — a
+                # telemetria mostra picos de 100%.
+                for j in range(1, 4):
+                    pivo = pts[cadeia[j - 1]]
+                    for k in range(j, 4):
+                        pts[cadeia[k]] = list(
+                            _girar(pts[cadeia[k]], pivo, GRAUS_POR_JUNTA * 0.7 * c)
+                        )
                 alvo = NEUTRA[5]
                 for j, k in enumerate(cadeia[1:], start=1):
-                    peso = c * (0.35 + 0.25 * j)       # a ponta se move mais
+                    peso = c * (0.30 + 0.20 * j)       # a ponta se move mais
                     pts[k] = [
                         pts[k][0] + (alvo[0] - pts[k][0]) * peso,
                         pts[k][1] + (alvo[1] - pts[k][1]) * peso,
