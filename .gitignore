@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Saidas de execucao — sao dados de sessao, nao codigo
+logs/
+telemetria/
+
+# Calibracao pessoal: os limiares de flexao sao do corpo de quem usa.
+# Versionar isso faria um clone sobrescrever a calibracao de outra pessoa.
+configuracao.json
+
+# Pesos de terceiros (MediaPipe/BlazePalm, ~7,4 MB). Baixados por
+# baixar_modelos.sh — ficam fora do repositorio para nao redistribuir
+# binarios de outro projeto junto com este codigo.
+modelos/*.onnx
