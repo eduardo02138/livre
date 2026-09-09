@@ -429,6 +429,8 @@ def main():
                 if not ja_estava_vinculado:
                     t_inicio_vinculo = t_agora
                     ja_estava_vinculado = True
+                    mapeador.recentrar(marcos)
+                    telemetria.registrar_evento(f"Centro do mouse auto-calibrado na postura da mao: ({mapeador.centro[0]:.2f}, {mapeador.centro[1]:.2f})", categoria="CALIB")
                 tempo_vinculado = t_agora - t_inicio_vinculo
 
                 hud.desenhar_esqueleto(tela, marcos)

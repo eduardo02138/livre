@@ -339,9 +339,14 @@ class RastreadorONNX:
         # dela (1.05 * v) e abre a caixa com margem ideal (2.9L)
         cx = float(pulso[0] + 1.05 * v[0])
         cy = float(pulso[1] + 1.05 * v[1])
+        # MIN_ROI_PIXELS filtra CANDIDATOS do detector de palma, que e onde
+        # sombra e dobra de roupa entram. Aplicar o mesmo corte aqui era
+        # errado: este ponto so e alcancado depois de o modelo de marcos ter
+        # CONFIRMADO a mao com score acima do limiar. Descartar por tamanho
+        # jogava fora rastreio bom de mao distante e criava um ciclo —
+        # confirma, descarta, redetecta, confirma — que dobrava o custo por
+        # quadro. Quem decide perda aqui e o score, nao o tamanho.
         novo_lado = float(np.clip(L * 2.9, 40.0, max_lado))
-        if novo_lado < MIN_ROI_PIXELS:
-            return None
 
         # Suavização da caixa de rastreio:
         # Não suavizamos o centro (cx, cy) para eliminar completamente o atraso (lag)

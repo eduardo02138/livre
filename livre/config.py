@@ -34,7 +34,7 @@ CONFIG_PADRAO = {
     },
     "mouse": {
         "vel_max": 900.0,
-        "zona_morta": 0.15,
+        "zona_morta": 0.20,
         "expo": 2.0,
     }
 }

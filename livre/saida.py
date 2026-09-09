@@ -46,8 +46,16 @@ class Saida:
 
     def aplicar(self, estado, dt):
         """Integra a velocidade em pixels e emite so o que mudou."""
-        self._resto_x += estado.vel_x * dt
-        self._resto_y += estado.vel_y * dt
+        if abs(estado.vel_x) < 1e-3:
+            self._resto_x = 0.0
+        else:
+            self._resto_x += estado.vel_x * dt
+
+        if abs(estado.vel_y) < 1e-3:
+            self._resto_y = 0.0
+        else:
+            self._resto_y += estado.vel_y * dt
+
         px = int(self._resto_x)
         py = int(self._resto_y)
         self._resto_x -= px
