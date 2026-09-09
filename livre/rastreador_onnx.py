@@ -42,6 +42,7 @@ DESLOC_Y_ROI = -0.5
 
 LIMIAR_PALMA = 0.35
 LIMIAR_MARCOS = 0.25
+MIN_ROI_PIXELS = 130.0  # Mão a 35-70cm em 640x480 tem >200px. Menor que 130px é ruído de fundo.
 
 
 def _ancoras():
@@ -163,10 +164,15 @@ class RastreadorONNX:
         restantes = np.arange(len(caixas))
         while restantes.size:
             i = restantes[0]
-            mantidos.append(i)
+            lado_roi = max(bw[i], bh[i]) * lado * ESCALA_ROI
+            if lado_roi >= MIN_ROI_PIXELS:
+                mantidos.append(i)
             if restantes.size == 1:
                 break
             restantes = restantes[1:][_iou(caixas[i], caixas[restantes[1:]]) < 0.3]
+
+        if not mantidos:
+            return None
         i = mantidos[0]
 
         # Keypoints 0 (base da palma) e 2 (base do dedo medio) dao a rotacao.
@@ -252,11 +258,6 @@ class RastreadorONNX:
                     self.detectou_palma = True
 
             if pontos is None or score < LIMIAR_MARCOS:
-                self._perdas_consecutivas += 1
-                if self._perdas_consecutivas <= 2 and self._ultimo_resultado is not None:
-                    # Tolerância curta (2 quadros) para evitar piscar em quedas transitórias
-                    self.score = score
-                    return self._registrar(self._ultimo_resultado, t_ini)
                 self._roi = None
                 self._ultimo_resultado = None
                 self.score = score
@@ -265,6 +266,9 @@ class RastreadorONNX:
         self._perdas_consecutivas = 0
         self.score = score
         self._roi = self._roi_dos_marcos(pontos, max_lado=float(max(h, w) * 1.5))
+        if self._roi is None:
+            self._ultimo_resultado = None
+            return self._registrar(None, t_ini)
         resultado = [(float(p[0]) / w, float(p[1]) / h) for p in pontos]
         self._ultimo_resultado = resultado
         return self._registrar(resultado, t_ini)
@@ -336,15 +340,17 @@ class RastreadorONNX:
         cx = float(pulso[0] + 1.05 * v[0])
         cy = float(pulso[1] + 1.05 * v[1])
         novo_lado = float(np.clip(L * 2.9, 40.0, max_lado))
+        if novo_lado < MIN_ROI_PIXELS:
+            return None
 
-        # Suavização da caixa de rastreio para estabilidade
+        # Suavização da caixa de rastreio:
+        # Não suavizamos o centro (cx, cy) para eliminar completamente o atraso (lag)
+        # durante movimentação rápida da mão (elimina cortes acidentais de dedos na borda da caixa).
+        # Apenas lado e ângulo recebem atenuação suave para evitar tremor.
         if self._roi is not None:
             ant_cx, ant_cy, ant_lado, ant_ang = self._roi
-            cx = 0.65 * cx + 0.35 * ant_cx
-            cy = 0.65 * cy + 0.35 * ant_cy
-            novo_lado = 0.65 * novo_lado + 0.35 * ant_lado
-            # Interpolação angular pelo caminho mais curto
+            novo_lado = 0.80 * novo_lado + 0.20 * ant_lado
             diff_ang = (ang - ant_ang + 180.0) % 360.0 - 180.0
-            ang = ant_ang + 0.65 * diff_ang
+            ang = ant_ang + 0.80 * diff_ang
 
         return (cx, cy, novo_lado, ang)

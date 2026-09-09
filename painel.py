@@ -481,6 +481,18 @@ def main():
                 ja_estava_vinculado = False
                 telemetria.registrar_quadro(fps=1.0/dt, estado=None, aciona=mapeador.aciona)
                 hud.desenhar_guia_biometria(tela, tem_mao=False, tempo_vinculado=0.0)
+                hud.desenhar_painel_teclas(tela, set(), set(), modo_uinput, mapeador.perfil_nome)
+                hud.desenhar_log_eventos(tela)
+
+                # Auto-release: solta imediatamente qualquer tecla/botão no kernel e limpa histórico
+                evs_reset = mapeador.reset()
+                if evs_reset:
+                    hud.registrar_eventos(evs_reset)
+                    for ev in evs_reset:
+                        telemetria.registrar_evento(ev, categoria="ACAO")
+
+                if modo_uinput and saida:
+                    saida.soltar_tudo()
 
             # Desenha Central de Configuração se TAB estiver ativo
             if menu_aberto:

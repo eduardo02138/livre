@@ -74,7 +74,14 @@ def flexao_dedo(marcos_geo, dedo):
     """Calcula flexao combinando angulo articular e encurtamento em espaço isométrico."""
     mcp, pip, dip, tip = (marcos_geo[i] for i in dedo)
 
-    # 1. Encurtamento: razao entre distancia ponta-base e o comprimento somado dos ossos
+    # 1. Angulo articular real das articulacoes interfalangicas (PIP e DIP).
+    # Dedos em repouso estao naturalmente entre 150 e 175 graus.
+    # Exige curvatura articular genuina (< 155 graus) para iniciar a contagem.
+    ang = (_angulo(mcp, pip, dip) + _angulo(pip, dip, tip)) / 2.0
+    f_angulo = max(0.0, min(1.0, (155.0 - ang) / 65.0))
+
+    # 2. Encurtamento: razao entre distancia ponta-base e o comprimento somado dos ossos.
+    # Em repouso, a razao fica acima de 0.85. Ao dobrar o dedo, cai abaixo de 0.50.
     comp_ossos = (math.hypot(pip[0]-mcp[0], pip[1]-mcp[1]) +
                   math.hypot(dip[0]-pip[0], dip[1]-pip[1]) +
                   math.hypot(tip[0]-dip[0], tip[1]-dip[1]))
@@ -82,14 +89,10 @@ def flexao_dedo(marcos_geo, dedo):
         return 0.0
 
     dist_direta = math.hypot(tip[0]-mcp[0], tip[1]-mcp[1])
-    f_encurtamento = max(0.0, min(1.0, (1.0 - (dist_direta / comp_ossos)) / 0.60))
+    f_encurtamento = max(0.0, min(1.0, (0.85 - (dist_direta / comp_ossos)) / 0.45))
 
-    # 2. Angulo medio das articulacoes interfalangicas
-    ang = (_angulo(mcp, pip, dip) + _angulo(pip, dip, tip)) / 2.0
-    f_angulo = max(0.0, min(1.0, (180.0 - ang) / 100.0))
-
-    # Fusao ponderada: 60% encurtamento + 40% angulo (elimina distorcao de profundidade)
-    return max(0.0, min(1.0, 0.60 * f_encurtamento + 0.40 * f_angulo))
+    # Fusao ponderada: 75% angulo articular (imune a corte de borda e perspectiva) + 25% encurtamento
+    return max(0.0, min(1.0, 0.75 * f_angulo + 0.25 * f_encurtamento))
 
 
 def flexao_polegar(marcos_geo):
@@ -228,6 +231,19 @@ class Mapeador:
     def recentrar(self, marcos):
         self.centro = centro_palma(marcos)
 
+    def reset(self):
+        """Limpa histórico de marcos e solta todos os estados internos."""
+        self._marcos_suaves = None
+        eventos = []
+        for nome, estava in self._estado_anterior_dobrado.items():
+            if estava:
+                tipo, alvo = self.acoes.get(nome, ("indefinido", ""))
+                eventos.append(f"{nome.upper()} [0%] -> {alvo} SOLTO")
+        self._estado_anterior_dobrado = {nome: False for nome in DEDOS}
+        self._estado_anterior_teclas.clear()
+        self._estado_anterior_botoes.clear()
+        return eventos
+
     def __call__(self, marcos, t):
         est = Estado(perfil=self.perfil_nome)
 
@@ -247,6 +263,11 @@ class Mapeador:
         # usando 'marcos' cru, que e o espaco em que o painel desenha.
         marcos_geo = [(x * self.aspecto, y) for x, y in self._marcos_suaves]
 
+        # Trava de segurança de borda: se a mão estiver muito próxima da borda (< 5%),
+        # inibe novos acionamentos para evitar picos causados pelo corte do sensor
+        cx_p, cy_p = centro_palma(marcos)
+        na_borda = (cx_p < 0.05 or cx_p > 0.95 or cy_p < 0.05 or cy_p > 0.95)
+
         dobrado = {}
         for nome, idx in DEDOS.items():
             if nome == "polegar":
@@ -255,7 +276,7 @@ class Mapeador:
                 f = flexao_dedo(marcos_geo, idx)
 
             est.flexoes[nome] = f
-            dobrado[nome] = self._hist[nome](f)
+            dobrado[nome] = False if na_borda else self._hist[nome](f)
 
         # -------------------------------------------------------------
         # REGRA BIOMECÂNICA DE EXCLUSIVIDADE MÚTUA W vs S

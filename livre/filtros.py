@@ -58,25 +58,34 @@ class OneEuro:
 
 
 class Histerese:
-    """Dois limiares: um para acionar, outro menor para soltar.
+    """Dois limiares com confirmação temporal: aciona com persistência e solta imediatamente.
 
-    Sem isso, qualquer valor parado em cima do limiar dispara e solta
-    dezenas de vezes por segundo.
+    Exige que o valor permaneça acima de 'aciona' por 'quadros_confirmacao' (padrão: 2)
+    para ativar, eliminando pulsos transitórios de 1 único quadro (30ms) causados
+    por ruído de sensor. A liberação continua imediata para máxima responsividade.
     """
 
-    def __init__(self, aciona, libera):
+    def __init__(self, aciona, libera, quadros_confirmacao=2):
         if libera >= aciona:
             raise ValueError("'libera' precisa ser menor que 'aciona'")
         self.aciona = aciona
         self.libera = libera
+        self.quadros_confirmacao = quadros_confirmacao
         self.ativo = False
+        self._contador = 0
 
     def __call__(self, valor):
         if self.ativo:
             if valor < self.libera:
                 self.ativo = False
-        elif valor > self.aciona:
-            self.ativo = True
+                self._contador = 0
+        else:
+            if valor >= self.aciona:
+                self._contador += 1
+                if self._contador >= self.quadros_confirmacao:
+                    self.ativo = True
+            else:
+                self._contador = 0
         return self.ativo
 
 

@@ -78,11 +78,20 @@ def verificar_dedos(nome_perfil, perfil):
     mapeador.recentrar(mao.marcos())
     problemas = []
 
+    # A histerese exige que o valor persista alguns quadros antes de acionar,
+    # o que elimina pulso de ruido de 1 quadro. O teste tem de alimentar essa
+    # janela — chamar o mapeador uma unica vez nunca aciona nada. Derivado do
+    # proprio valor para nao quebrar de novo se a janela mudar.
+    janela = max((getattr(h, "quadros_confirmacao", 1)
+                  for h in mapeador._hist.values()), default=1)
+
     print(f"\n  perfil {nome_perfil}")
     for dedo in DEDOS:
         mao.deslocamento = (0.0, 0.0)
         mao.curvas = {n: (CURVA_FORTE if n == dedo else 0.0) for n in mao.curvas}
-        est = mapeador(mao.marcos(), 0.0)
+        est = None
+        for i in range(janela + 1):
+            est = mapeador(mao.marcos(), i / HZ)
 
         teclas_e, botoes_e, modo_e = _esperado(nome_perfil, dedo)
         flex = est.flexoes[dedo]
