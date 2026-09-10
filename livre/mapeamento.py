@@ -35,6 +35,10 @@ from .perfis import (  # noqa: F401  reexportado por compatibilidade
 # um pico de ate 2 quadros e descartado sem afetar o valor de repouso.
 TAMANHO_MEDIANA = 5
 
+# Media de flexao dos quatro dedos longos para reconhecer punho fechado.
+# Medido: acordes deliberados se concentram em 70-79%; punho real vai a 80-99%.
+MEDIA_PUNHO = 0.82
+
 
 @dataclass
 class Estado:
@@ -260,14 +264,28 @@ class Mapeador:
             media_longos = sum(longos_flex) / 4.0
             qtd_longos_flex = sum(1 for f in longos_flex if f >= 0.55)
 
-            # Critério de ativação do punho fechado:
-            # 1. Média dos dedos longos >= 62% E pelo menos 3 dedos longos dobrados (>= 55%)
-            # 2. OU conflito biomecânico simultâneo W + S + Anelar
-            candidato_punho = (media_longos >= 0.62 and qtd_longos_flex >= 3) or (
-                est.flexoes.get("indicador", 0.0) >= 0.65
-                and est.flexoes.get("medio", 0.0) >= 0.65
-                and est.flexoes.get("anelar", 0.0) >= 0.55
-            )
+            # Punho fechado = mao INTEIRA fechada com FORCA, nao "varios dedos
+            # dobrados". A distincao importa porque num jogo de movimento se
+            # aciona varias teclas ao mesmo tempo de proposito, e o criterio
+            # antigo (media >= 62% com 3 dedos, ou o atalho indicador+medio+
+            # anelar) suprimia 26,8% de todos os quadros com mao: um em cada
+            # quatro.
+            #
+            # Duas medidas nos dados reais guiaram isto:
+            #
+            # O mindinho NAO serve para distinguir. Em 93-96% dos quadros com
+            # 3 dedos longos dobrados ele ja esta dobrado junto — e o
+            # acoplamento de tendao entre anelar e mindinho, involuntario. Por
+            # isso exigir os 4 nao custa deteccao de punho real, mas descarta
+            # o acorde em que o mindinho ficou para tras.
+            #
+            # O que separa e a PROFUNDIDADE. A media dos longos se concentra em
+            # 70-79% nos acordes deliberados e sobe para 80-99% no punho de
+            # verdade. Em 82% o criterio cai para 6,0% dos quadros.
+            #
+            # O polegar foi testado como requisito e reprovado: exigi-lo levaria
+            # a 0,9%, e o gesto de punho praticamente deixaria de funcionar.
+            candidato_punho = media_longos >= MEDIA_PUNHO and qtd_longos_flex >= 4
 
             if not self._punho_fechado:
                 if candidato_punho:
