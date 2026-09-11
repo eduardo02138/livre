@@ -160,18 +160,34 @@ class Mapeador:
             self._hist[nome].libera = max(0.12, min(0.80, lib + self.offset_sensibilidade))
 
     def aplicar_configuracao(self, config):
-        """Aplica parâmetros individuais da configuração persistente."""
+        """Aplica parâmetros individuais da configuração persistente.
+
+        Sincroniza tambem o NOME do perfil. Sem isso o Mapeador nascia em
+        "DIRETO", carregava as acoes de outro perfil gravado em disco e
+        mantinha o nome antigo — o sistema se comportava como OVERWATCH
+        enquanto se dizia DIRETO, e o [P] calculava o proximo do ciclo a
+        partir do lugar errado, pulando perfis.
+        """
         self.config = config
+        nome = config.dados.get("perfil")
+        if nome in PERFIS:
+            self.perfil_nome = nome
         for nome in DEDOS:
             d = config.obter_dedo(nome)
             self._hist[nome].aciona = d["aciona"]
             self._hist[nome].libera = d["libera"]
             self.acoes[nome] = (d["tipo"], d["alvo"])
 
+        # Reconstroi em vez de mesclar: mesclar deixaria gesto de um perfil
+        # anterior vivo depois da troca — a piscada longa, por exemplo, so
+        # existe no perfil MEU e continuaria disparando fora dele.
         r_cfg = config.dados.get("rosto", {})
+        novos_gestos = {}
         for gesto in ("olho_direito", "olho_esquerdo", "piscada_longa", "boca"):
-            if gesto in r_cfg:
-                self.acoes_rosto[gesto] = (r_cfg[gesto]["tipo"], r_cfg[gesto]["alvo"])
+            if isinstance(r_cfg.get(gesto), dict):
+                novos_gestos[gesto] = (r_cfg[gesto]["tipo"], r_cfg[gesto]["alvo"])
+        if novos_gestos:
+            self.acoes_rosto = novos_gestos
 
         m = config.dados.get("mouse", {})
         self.modo_mouse = m.get("modo", self.modo_mouse)

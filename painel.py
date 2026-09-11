@@ -556,7 +556,7 @@ def main():
     altura = camera.altura if camera else 480
 
     hud = HUD(largura, altura)
-    mapeador = Mapeador()
+    mapeador = Mapeador(perfil_padrao=config.dados.get("perfil", "DIRETO"))
     mapeador.aplicar_configuracao(config)
 
     rastreador_rosto = None
