@@ -15,8 +15,7 @@ import sys
 import time
 
 from livre.fonte import MaoSintetica
-from livre.mapeamento import (DEDOS, PERFIL_DIRETO, PERFIL_HIBRIDO, TAMANHO_MEDIANA,
-                               Mapeador)
+from livre.mapeamento import DEDOS, PERFIS, TAMANHO_MEDIANA, Mapeador
 
 HZ = 30.0
 CURVA_FORTE = 0.95
@@ -31,10 +30,24 @@ CURVA_FORTE = 0.95
 FIXADO = {
     "DIRETO": {
         "polegar":   ("botao", "ESQUERDO"),
-        "indicador": ("tecla", "W"),
-        "medio":     ("tecla", "S"),
+        "indicador": ("botao", "DIREITO"),
+        "medio":     ("tecla", "W"),
         "anelar":    ("tecla", "E"),
-        "mindinho":  ("botao", "DIREITO"),
+        "mindinho":  ("tecla", "S"),
+    },
+    "MEU": {
+        "polegar":   ("botao", "ESQUERDO"),
+        "indicador": ("botao", "DIREITO"),
+        "medio":     ("tecla", "W"),
+        "anelar":    ("tecla", "D"),
+        "mindinho":  ("tecla", "S"),
+    },
+    "OVERWATCH": {
+        "polegar":   ("botao", "ESQUERDO"),
+        "indicador": ("botao", "DIREITO"),
+        "medio":     ("modo", "MOVIMENTO"),
+        "anelar":    ("tecla", "R"),
+        "mindinho":  ("tecla", "ESPACO"),
     },
     "HIBRIDO": {
         "polegar":   ("botao", "ESQUERDO"),
@@ -60,7 +73,7 @@ def verificar_perfis_fixados():
     """Os perfis em mapeamento.py ainda batem com a tabela fixada?"""
     print("\n  perfis conferem com a tabela fixada")
     problemas = []
-    for nome, vivo in (("DIRETO", PERFIL_DIRETO), ("HIBRIDO", PERFIL_HIBRIDO)):
+    for nome, vivo in ((n, PERFIS[n]) for n in FIXADO):
         divergencias = {
             d: (FIXADO[nome].get(d), vivo.get(d))
             for d in set(FIXADO[nome]) | set(vivo)
@@ -229,14 +242,26 @@ def verificar_punho_fechado():
     if not ok_aberto:
         problemas.append("punho_fechado: mao reaberta permaneceu travada em punho")
 
-    # 3. Combo deliberado: Andar + Mirar (Indicador + Mindinho) NÃO deve ser considerado punho
-    mao.curvas = {n: (CURVA_FORTE if n in ("indicador", "mindinho") else 0.0) for n in mao.curvas}
+    # 3. Combo deliberado de DOIS dedos nao pode ser lido como punho.
+    # O esperado vem da tabela fixada, nao escrito a mao: a alocacao dos dedos
+    # muda conforme a telemetria de acoplamento, e um teste com "W" e "DIREITO"
+    # cravados reprovaria a cada realocacao sem que nada tivesse quebrado.
+    par = ("indicador", "mindinho")
+    mao.curvas = {n: (CURVA_FORTE if n in par else 0.0) for n in mao.curvas}
     for i in range(12, 18):
         est = mapeador(mao.marcos(), i / HZ)
-    ok_combo = (not est.punho_fechado and est.teclas == {"W"} and est.botoes == {"DIREITO"})
-    print(f"    {'ok  ' if ok_combo else 'FALHA'} combo W + Mindinho liberado (teclas={sorted(est.teclas)} botoes={sorted(est.botoes)})")
+    teclas_e, botoes_e = set(), set()
+    for d in par:
+        tipo, alvo = FIXADO["DIRETO"][d]
+        (teclas_e if tipo == "tecla" else botoes_e).add(alvo)
+    ok_combo = (not est.punho_fechado and est.teclas == teclas_e and est.botoes == botoes_e)
+    print(f"    {'ok  ' if ok_combo else 'FALHA'} combo de 2 dedos liberado "
+          f"(teclas={sorted(est.teclas)} botoes={sorted(est.botoes)})")
     if not ok_combo:
-        problemas.append(f"punho_fechado: combo legitimo W+Mindinho bloqueado indevidamente (teclas={est.teclas} botoes={est.botoes})")
+        problemas.append(
+            f"punho_fechado: combo legitimo {'+'.join(par)} bloqueado — "
+            f"esperava teclas={sorted(teclas_e)} botoes={sorted(botoes_e)}, "
+            f"veio teclas={sorted(est.teclas)} botoes={sorted(est.botoes)}")
 
     return problemas
 
@@ -322,10 +347,14 @@ def verificar_acoes_faciais():
     for i in range(janela):
         mapeador(mao.marcos(), i * 0.033, estado_rosto=None)
     est_combo = mapeador(mao.marcos(), 1.0, estado_rosto=rosto_dir)
-    if "W" in est_combo.teclas and "SHIFT" in est_combo.teclas:
-        print("    ok   simultaneidade perfeita: Dedo (W) + Rosto (SHIFT) ativos juntos")
+    tipo_ind, alvo_ind = FIXADO["DIRETO"]["indicador"]
+    saiu_ind = (alvo_ind in est_combo.teclas) if tipo_ind == "tecla" else (alvo_ind in est_combo.botoes)
+    if saiu_ind and "SHIFT" in est_combo.teclas:
+        print(f"    ok   simultaneidade: dedo ({alvo_ind}) + rosto (SHIFT) ativos juntos")
     else:
-        problemas.append(f"Simultaneidade falhou: teclas={est_combo.teclas}")
+        problemas.append(
+            f"Simultaneidade falhou: esperava {alvo_ind} + SHIFT, "
+            f"veio teclas={sorted(est_combo.teclas)} botoes={sorted(est_combo.botoes)}")
 
     # 6. Perda de Rosto / Soltura segura
     est_livre = mapeador(None, 1.5, estado_rosto=EstadoRosto(tem_rosto=False))
@@ -342,8 +371,8 @@ def main():
 
     problemas = []
     problemas += verificar_perfis_fixados()
-    problemas += verificar_dedos("DIRETO", PERFIL_DIRETO)
-    problemas += verificar_dedos("HIBRIDO", PERFIL_HIBRIDO)
+    for nome in FIXADO:
+        problemas += verificar_dedos(nome, PERFIS[nome])
     problemas += verificar_mira()
     problemas += verificar_diagonal()
     problemas += verificar_punho_fechado()

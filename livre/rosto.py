@@ -29,6 +29,10 @@ from .filtros import Histerese
 
 ENTRADA_FACE = 128
 ENTRADA_MARCOS_FACE = 192
+# Quadros de olhos fechados para a piscada longa contar como comando.
+# 12 quadros a 30 fps = ~400 ms; a piscada natural fica em 100-150 ms.
+QUADROS_PISCADA_LONGA = 12
+
 LIMIAR_FACE = 0.50
 ESCALA_ROI_FACE = 1.45
 
@@ -62,6 +66,7 @@ class EstadoRosto:
     piscadela_esquerda: bool = False
     boca_aberta: bool = False
     piscando_ambos: bool = False
+    piscada_longa: bool = False
     caixa_rosto: tuple = None
     marcos_olho_dir: list = field(default_factory=list)
     marcos_olho_esq: list = field(default_factory=list)
@@ -88,6 +93,7 @@ def _sigmoide(x):
 
 class RastreadorRostoONNX:
     def __init__(self, diretorio_modelos=None):
+        self._cont_piscada_longa = 0
         if ort is None or cv2 is None:
             raise RuntimeError("OpenCV e ONNX Runtime são necessários para o rastreamento facial.")
 
@@ -263,6 +269,21 @@ class RastreadorRostoONNX:
         piscadela_esq = self._hist_olho_esq(1.0 if candidato_wink_esq else 0.0)
         boca_aberta = self._hist_boca(mar)
 
+        # PISCADA LONGA: fechar os DOIS olhos e SEGURAR.
+        #
+        # Piscar os dois e involuntario — acontece 15 a 20 vezes por minuto —,
+        # e por isso 'piscando_ambos' sozinho nunca pode virar comando: dispararia
+        # uma habilidade a cada poucos segundos sem voce querer.
+        #
+        # O que separa e a DURACAO. Piscada natural dura 100-150 ms; segurar os
+        # olhos fechados de proposito passa facil de 400 ms. Com QUADROS_PISCADA_LONGA
+        # quadros a 30 fps o piso fica em ~400 ms, acima da natural com folga.
+        if piscando_ambos:
+            self._cont_piscada_longa += 1
+        else:
+            self._cont_piscada_longa = 0
+        piscada_longa = self._cont_piscada_longa >= QUADROS_PISCADA_LONGA
+
         cx_box, cy_box, lado_box, _ = self._roi
         caixa = (
             int(cx_box - lado_box / 2),
@@ -280,6 +301,7 @@ class RastreadorRostoONNX:
             piscadela_esquerda=piscadela_esq,
             boca_aberta=boca_aberta,
             piscando_ambos=piscando_ambos,
+            piscada_longa=piscada_longa,
             caixa_rosto=caixa,
             marcos_olho_dir=[marcos[i] for i in INDICES_OLHO_DIR["cantos"] + INDICES_OLHO_DIR["topo"] + INDICES_OLHO_DIR["base"]],
             marcos_olho_esq=[marcos[i] for i in INDICES_OLHO_ESQ["cantos"] + INDICES_OLHO_ESQ["topo"] + INDICES_OLHO_ESQ["base"]],

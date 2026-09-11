@@ -27,7 +27,10 @@ from .perfis import (  # noqa: F401  reexportado por compatibilidade
     LIMIARES_INDIVIDUAIS,
     PERFIL_DIRETO,
     PERFIL_HIBRIDO,
+    PERFIS,
     perfil_por_nome,
+    proximo_perfil,
+    rosto_por_perfil,
 )
 
 
@@ -113,14 +116,11 @@ class Mapeador:
         self._cont_libera_punho = 0
 
         # Mapeamento e estado de ações faciais (Overwatch Specials & Ultimate)
-        self.acoes_rosto = {
-            "olho_direito":  ("tecla", "SHIFT"),
-            "olho_esquerdo": ("tecla", "E"),
-            "boca":          ("tecla", "Q"),
-        }
+        self.acoes_rosto = rosto_por_perfil(perfil_padrao)
         self._estado_anterior_rosto = {
             "olho_direito": False,
             "olho_esquerdo": False,
+            "piscada_longa": False,
             "boca": False,
         }
 
@@ -169,7 +169,7 @@ class Mapeador:
             self.acoes[nome] = (d["tipo"], d["alvo"])
 
         r_cfg = config.dados.get("rosto", {})
-        for gesto in ("olho_direito", "olho_esquerdo", "boca"):
+        for gesto in ("olho_direito", "olho_esquerdo", "piscada_longa", "boca"):
             if gesto in r_cfg:
                 self.acoes_rosto[gesto] = (r_cfg[gesto]["tipo"], r_cfg[gesto]["alvo"])
 
@@ -181,13 +181,27 @@ class Mapeador:
         self.expo = float(m.get("expo", self.expo))
 
     def trocar_perfil(self):
-        if self.perfil_nome == "DIRETO":
-            self.perfil_nome = "HIBRIDO"
-            self.acoes = perfil_por_nome("HIBRIDO")
-        else:
-            self.perfil_nome = "DIRETO"
-            self.acoes = perfil_por_nome("DIRETO")
+        """Avanca para o proximo perfil do ciclo definido em perfis.PERFIS."""
+        self.perfil_nome = proximo_perfil(self.perfil_nome)
+        self.acoes = perfil_por_nome(self.perfil_nome)
+        self.acoes_rosto = rosto_por_perfil(self.perfil_nome)
         return self.perfil_nome
+
+    # As duas checagens abaixo olham o CONTEUDO do perfil, nao o nome dele.
+    # Amarrar comportamento a 'perfil_nome == "HIBRIDO"' fazia com que um
+    # perfil novo com modo de movimento simplesmente nao o ativasse.
+
+    def _dedo_de_modo(self):
+        """Nome do dedo que chaveia o modo movimento, se houver."""
+        for nome, (tipo, alvo) in self.acoes.items():
+            if tipo == "modo" and alvo == "MOVIMENTO":
+                return nome
+        return None
+
+    def _tem_ws_nos_dedos(self):
+        """W e S saem de dedos neste perfil? So ai faz sentido a exclusividade."""
+        alvos = {alvo for tipo, alvo in self.acoes.values() if tipo == "tecla"}
+        return "W" in alvos and "S" in alvos
 
     def recentrar(self, marcos):
         self.centro = centro_palma(marcos)
@@ -351,7 +365,7 @@ class Mapeador:
             punho_fechado = self._detectar_punho_fechado(est.flexoes)
             
             # Aplicar exclusividade mútua W/S e desacoplamento de dedos
-            if not punho_fechado and self.perfil_nome == "DIRETO":
+            if not punho_fechado and self._tem_ws_nos_dedos():
                 self._aplicar_exclusividade_ws(est.flexoes, dobrado)
                 self._aplicar_desacoplamento_dedos(est.flexoes, dobrado)
             elif punho_fechado:
@@ -430,8 +444,9 @@ class Mapeador:
                 vx = velocidade(dx, self.zona_morta, self.expo, self.vel_max)
                 vy = velocidade(dy, self.zona_morta, self.expo, self.vel_max)
 
-            if self.perfil_nome == "HIBRIDO":
-                est.modo_movimento = dobrado.get("medio", False)
+            dedo_modo = self._dedo_de_modo()
+            if dedo_modo:
+                est.modo_movimento = dobrado.get(dedo_modo, False)
                 if est.modo_movimento:
                     if dy < -self.zona_morta:
                         est.teclas.add("W")
@@ -474,6 +489,7 @@ class Mapeador:
             gestos_rosto = {
                 "olho_direito": estado_rosto.piscadela_direita,
                 "olho_esquerdo": estado_rosto.piscadela_esquerda,
+                "piscada_longa": getattr(estado_rosto, "piscada_longa", False),
                 "boca": estado_rosto.boca_aberta,
             }
 
