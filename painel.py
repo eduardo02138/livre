@@ -431,11 +431,11 @@ class HUD:
             cv2.putText(tela, f"• {msg}", (x, y + 12 + i * 16),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.38, alfa_cor, 1, cv2.LINE_AA)
 
-    def desenhar_central_configuracao(self, tela, config, dedo_selecionado):
+    def desenhar_central_configuracao(self, tela, config, dedo_selecionado, perfil_nome="DIRETO"):
         """Desenha o modal completo de configuração na tela quando TAB é pressionado."""
         overlay = tela.copy()
         cx, cy = self.w // 2, self.h // 2
-        card_w, card_h = 560, 380
+        card_w, card_h = 560, 470
         x1 = cx - card_w // 2
         y1 = cy - card_h // 2
         x2 = x1 + card_w
@@ -451,8 +451,26 @@ class HUD:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2, cv2.LINE_AA)
         cv2.line(tela, (x1 + 20, y1 + 45), (x2 - 20, y1 + 45), (70, 90, 110), 1)
 
+        # Faixa do perfil ativo, com o ciclo inteiro visivel
+        from livre.perfis import PERFIS
+        y_perf = y1 + 68
+        cv2.rectangle(tela, (x1 + 20, y_perf - 16), (x2 - 20, y_perf + 8), (30, 40, 58), -1)
+        cv2.putText(tela, "PERFIL [P]:", (x1 + 30, y_perf),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, (180, 200, 220), 1, cv2.LINE_AA)
+        x_nome = x1 + 130
+        for nome in PERFIS:
+            ativo = (nome == perfil_nome)
+            cor = (0, 255, 255) if ativo else (110, 125, 145)
+            largura = len(nome) * 9 + 12
+            if ativo:
+                cv2.rectangle(tela, (x_nome - 5, y_perf - 14), (x_nome + largura - 8, y_perf + 6),
+                              (0, 90, 110), -1)
+            cv2.putText(tela, nome, (x_nome, y_perf),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.40, cor, 2 if ativo else 1, cv2.LINE_AA)
+            x_nome += largura
+
         # Linhas para cada dedo
-        y_item = y1 + 75
+        y_item = y1 + 105
         cv2.putText(tela, "DEDO          AÇÃO ATRIBUÍDA       LIMIAR ACIONA   SOLTA", (x1 + 30, y_item),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.38, (180, 200, 220), 1, cv2.LINE_AA)
 
@@ -478,8 +496,26 @@ class HUD:
             cv2.putText(tela, f"{int(d['libera']*100):3d}%", (x1 + 450, y_item),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.42, (100, 180, 255), 1, cv2.LINE_AA)
 
+        # Seção do Rosto — muda junto com o perfil
+        y_item += 34
+        cv2.line(tela, (x1 + 20, y_item - 12), (x2 - 20, y_item - 12), (70, 90, 110), 1)
+        r = config.dados.get("rosto", {})
+        rotulos = {
+            "olho_direito":  "piscadela dir",
+            "olho_esquerdo": "piscadela esq",
+            "piscada_longa": "2 olhos 400ms",
+            "boca":          "boca aberta",
+        }
+        partes = []
+        for gesto, rotulo in rotulos.items():
+            if isinstance(r.get(gesto), dict):
+                partes.append(f"{rotulo}->{r[gesto]['alvo']}")
+        txt_rosto = "ROSTO: " + ("  |  ".join(partes) if partes else "sem gestos")
+        cv2.putText(tela, txt_rosto, (x1 + 30, y_item + 6),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.36, (200, 160, 255), 1, cv2.LINE_AA)
+
         # Seção do Mouse
-        y_item += 40
+        y_item += 34
         cv2.line(tela, (x1 + 20, y_item - 12), (x2 - 20, y_item - 12), (70, 90, 110), 1)
         m = config.dados.get("mouse", {})
         modo_m = m.get("modo", "relativo").upper()
@@ -492,7 +528,7 @@ class HUD:
         # Rodapé de Ajuda
         y_item += 40
         cv2.rectangle(tela, (x1 + 20, y_item - 10), (x2 - 20, y_item + 25), (25, 30, 42), -1)
-        cv2.putText(tela, "[1-5]: Dedo  |  [A]: Troca Acao (c/ menu)  |  [+/-]: Sens.  |  [M]: Modo Mouse  |  [TAB]: Fechar",
+        cv2.putText(tela, "[1-5]: Dedo | [A]: Acao | [+/-]: Sens. | [P]: Perfil | [M]: Modo Mouse | [TAB]: Fechar",
                     (x1 + 24, y_item + 12), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (0, 255, 255), 1, cv2.LINE_AA)
 
 
@@ -561,6 +597,7 @@ def main():
     print("  • [1] a [5]: Seleciona o dedo para calibrar")
     print("  • [+] / [-]: Altera sensibilidade do dedo selecionado")
     print("  • [A]: Cicla a tecla/ação do dedo selecionado (com [TAB] aberto)")
+    print("  • [P]: Trocar perfil da mao e do rosto (DIRETO / MEU / OVERWATCH / HIBRIDO)")
     print("  • [M]: Alternar modo do mouse (Relativo vs Joystick)")
     print("  • [<] / [>]: Sensibilidade / Velocidade do mouse | [Z]: Zona morta")
     print("  • [C] ou [R]: Recentralizar e re-travar rastreador na mão")
@@ -714,7 +751,7 @@ def main():
 
             # Desenha Central de Configuração se TAB estiver ativo
             if menu_aberto:
-                hud.desenhar_central_configuracao(tela, config, dedo_selecionado)
+                hud.desenhar_central_configuracao(tela, config, dedo_selecionado, mapeador.perfil_nome)
 
             # FPS e indicador de gravação
             fps = 1.0 / dt
@@ -771,6 +808,19 @@ def main():
                 mapeador.aplicar_configuracao(config)
                 telemetria.registrar_evento(f"{dedo_selecionado.upper()} sensibilidade diminuida: {int(ac*100)}%", categoria="CONFIG")
                 print(f"\n⬇️ {dedo_selecionado.upper()} sensibilidade DIMINUÍDA: aciona={int(ac*100)}% libera={int(lib*100)}%")
+            elif tecla in (ord('p'), ord('P')):
+                # Troca o perfil inteiro: dedos E gestos de rosto.
+                # Passa pelo config para o menu da tela refletir a mudanca,
+                # e so depois reaplica no mapeador — aplicar_configuracao le
+                # do config, entao a ordem importa.
+                novo_perfil = mapeador.trocar_perfil()
+                config.aplicar_perfil(novo_perfil)
+                mapeador.aplicar_configuracao(config)
+                if saida:
+                    saida.soltar_tudo()          # nada preso do perfil anterior
+                mapeador.reset()
+                telemetria.registrar_evento(f"Perfil trocado para: {novo_perfil}", categoria="CONFIG")
+                print(f"\n🖐️ Perfil da mao: [{novo_perfil}]")
             elif tecla in (ord('m'), ord('M')):
                 novo_modo = config.alternar_modo_mouse()
                 mapeador.aplicar_configuracao(config)

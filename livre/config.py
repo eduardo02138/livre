@@ -119,6 +119,32 @@ class Configuracao:
         self.salvar()
         return novo_tipo, novo_alvo
 
+    def aplicar_perfil(self, nome):
+        """Grava um perfil inteiro (mao + rosto) na configuracao persistente.
+
+        Trocar de perfil precisa passar por aqui, e nao so pelo Mapeador: o
+        menu da tela le de config.obter_dedo(), entao um perfil trocado apenas
+        em memoria mudaria o comportamento sem mudar o que a tela mostra.
+        Os limiares de cada dedo sao preservados — sao calibracao do corpo de
+        quem usa, nao fazem parte do perfil.
+        """
+        from .perfis import perfil_por_nome, rosto_por_perfil
+
+        for dedo, (tipo, alvo) in perfil_por_nome(nome).items():
+            d = self.dados.setdefault("dedos", {}).setdefault(dedo, {})
+            d["tipo"] = tipo
+            d["alvo"] = alvo
+
+        r = self.dados.setdefault("rosto", {})
+        for gesto in ("olho_direito", "olho_esquerdo", "piscada_longa", "boca"):
+            r.pop(gesto, None)
+        for gesto, (tipo, alvo) in rosto_por_perfil(nome).items():
+            r[gesto] = {"tipo": tipo, "alvo": alvo}
+
+        self.dados["perfil"] = nome
+        self.salvar()
+        return nome
+
     def alternar_modo_mouse(self):
         """Alterna entre 'relativo' (delta) e 'joystick' (velocidade)."""
         m = self.dados.setdefault("mouse", {})
